@@ -1,0 +1,19 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mainbot", "C-Main\Mainbot.csproj", "{215280F0-BEA5-86C7-C326-CB84023D7E24}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{215280F0-BEA5-86C7-C326-CB84023D7E24}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{215280F0-BEA5-86C7-C326-CB84023D7E24}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{215280F0-BEA5-86C7-C326-CB84023D7E24}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{215280F0-BEA5-86C7-C326-CB84023D7E24}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
