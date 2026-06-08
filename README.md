@@ -4,6 +4,14 @@
 
 ---
 
+## ✅ Own the final Bot (24/7 online)
+> You can copy the link and invite him in your Server.
+> https://discord.com/oauth2/authorize?client_id=1435244593301159978&permissions=8&integration_type=0&scope=bot
+
+Please read the [LICENSE](LICENSE) before you copy code or fork it.
+
+---
+
 ## 📦 Requirements
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
