@@ -59,7 +59,7 @@ namespace MainbotCSharp
                     Console.WriteLine($"Security HandleUserJoined error: {ex.Message}");
                 }
             };
-            _client.JoinedGuild += OnJoinedGuild;
+
         }
 
         public async Task InitializeAsync()
@@ -81,8 +81,6 @@ namespace MainbotCSharp
         {
             Console.WriteLine($"Mainbot ready. Logged in as {_client.CurrentUser}");
             await _client.SetActivityAsync(new Game("Managing the server"));
-
-            await CheckAndLeaveUnauthorizedServers();
 
             try { await MainbotCSharp.Modules.VoiceService.StartBackgroundTasks(_client); } catch (Exception ex) { Console.WriteLine("VoiceService start error: " + ex); }
 
@@ -323,16 +321,6 @@ namespace MainbotCSharp
             return BotOwners.Contains(userId);
         }
 
-        private static readonly ulong[] AllowedGuilds = {
-            REMOVED_GUILD_IDUL,
-            REMOVED_GUILD_IDUL,
-            REMOVED_GUILD_IDUL,
-            REMOVED_GUILD_IDUL,
-            REMOVED_GUILD_IDUL,
-            REMOVED_GUILD_IDUL,
-            1226105316404498475UL
-        };
-
         private static readonly Dictionary<string, string> MainBotInvites = new Dictionary<string, string>
         {
             { "main1", "REMOVED_INVITE" },
@@ -343,90 +331,5 @@ namespace MainbotCSharp
             { "friend", "REMOVED_INVITE" }
         };
 
-        private async Task OnJoinedGuild(SocketGuild guild)
-        {
-            Console.WriteLine($"🎯 Bot was added to server: {guild.Name} (ID: {guild.Id})");
-            
-            bool serverWhitelisted = AllowedGuilds.Contains(guild.Id);
-            
-            Console.WriteLine($"🔍 Server whitelist check: {guild.Name} (ID: {guild.Id}) - Whitelisted: {serverWhitelisted}");
-            
-            if (!serverWhitelisted)
-            {
-                Console.WriteLine($"🚫 Leaving unauthorized server: {guild.Name} (ID: {guild.Id})");
-                
-                try
-                {
-                    var systemChannel = guild.SystemChannel ?? guild.DefaultChannel ?? guild.TextChannels.FirstOrDefault();
-                    if (systemChannel != null)
-                    {
-                        var embed = new EmbedBuilder()
-                            .WithTitle("🚫 Private Bot")
-                            .WithDescription("This bot is private and can only be used in authorized servers.\n\nThe bot will now leave this server.")
-                            .WithColor(Color.Red)
-                            .WithCurrentTimestamp()
-                            .Build();
-                        
-                        await systemChannel.SendMessageAsync(embed: embed);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Could not send leave message: {ex.Message}");
-                }
-                
-                await Task.Delay(3000);
-                await guild.LeaveAsync();
-            }
-            else
-            {
-                Console.WriteLine($"✅ Staying in authorized server: {guild.Name} (ID: {guild.Id})");
-            }
-        }
-
-        private async Task CheckAndLeaveUnauthorizedServers()
-        {
-            Console.WriteLine("🔍 Checking current servers against whitelist...");
-            
-            foreach (var guild in _client.Guilds.ToList())
-            {
-                bool serverWhitelisted = AllowedGuilds.Contains(guild.Id);
-                
-                if (!serverWhitelisted)
-                {
-                    Console.WriteLine($"🚫 Leaving unauthorized server: {guild.Name} (ID: {guild.Id})");
-                    
-                    try
-                    {
-                        var systemChannel = guild.SystemChannel ?? guild.DefaultChannel ?? guild.TextChannels.FirstOrDefault();
-                        if (systemChannel != null)
-                        {
-                            var embed = new EmbedBuilder()
-                                .WithTitle("🚫 Private Bot - Leaving Server")
-                                .WithDescription("This bot is now set to private mode and can only be used in authorized servers.\n\nThe bot will leave this server.")
-                                .WithColor(Color.Red)
-                                .WithCurrentTimestamp()
-                                .Build();
-                            
-                            await systemChannel.SendMessageAsync(embed: embed);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Could not send leave message to {guild.Name}: {ex.Message}");
-                    }
-                    
-                    await Task.Delay(3000);
-                    await guild.LeaveAsync();
-                    await Task.Delay(1000);
-                }
-                else
-                {
-                    Console.WriteLine($"✅ Staying in authorized server: {guild.Name} (ID: {guild.Id})");
-                }
-            }
-            
-            Console.WriteLine("✅ Server authorization check completed.");
-        }
     }
 }

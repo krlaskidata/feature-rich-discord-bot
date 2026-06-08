@@ -29,32 +29,6 @@ namespace MainbotCSharp.Modules
                 .WithTitle("**Code.Master()**")
                 .WithColor(0x40E0D0)
                 .WithDescription("*This bot is a community bot and can only be used upon admin request. *More features, better performance, superior design!*")
-                .AddField("★ **EPIC ECONOMY SYSTEM FREE, AMAZING & EAZY**",
-                    "**WAY BETTER THAN NOCTALY AND TICKET KING - ALL FREE!**\n" +
-                    "**Start here =**\n" +
-                    "1 `!daily` - Get your first credits!\n" +
-                    "2 `!setsecuritymod` - Setup your security system.\n" +
-                    "3 `!ticket-setup` - Build your ticket system.\n" +
-                    "4 `!set-support` - Set support role for ticket management.\n" +
-                    "5 `!coinflip 100 heads` - Try gambling!\n" +
-                    "6 `!admin` - If you also wants to use the bot!\n" +
-                    "→ *Smart anti-addiction protection built-in*\n" +
-                    "→ *Advanced level system with XP & bonuses*\n" +
-                    "→ *Work & daily streak multipliers*\n" +
-                    "→ *ALL FEATURES 100% FREE!*", false)         
-
-                .AddField("★ **ULTIMATE GAMING CASINO***FREE & EPIC*",
-                    "**GAMBLING PARADISE - NOCTALY COULD NEVER!**\n" +
-                    "`!coinflip <bet> <heads/tails>` - Advanced coin betting with animation!\n" +
-                    "`!dice <bet> <prediction> [6/20/100]` - Multi-sided dice casino!\n" +
-                    "`!slots <bet>` - Mega slot machine with progressive jackpots!\n" +
-                    "`!blackjack` - Full blackjack system (coming soon!)\n" +
-                    "→ *Anti-addiction smart betting limits*\n" +
-                    "→ *Beautiful animations & suspense effects*\n" +
-                    "→ *Streak bonuses & progressive rewards*\n" +
-                    "→ *WAY MORE ADVANCED THAN OTHER BOTS!*\n" +
-                    "→ **COMPLETELY FREE!**", false)
-
                 .AddField("★ **Security Commands**",
                     "**Setup / Status**\n" +
                     "`!setsecuritymod` - Security einrichten (Log-Channel setzen/erstellen) und aktivieren\n" +
@@ -89,40 +63,6 @@ namespace MainbotCSharp.Modules
                     "`!voicestats` - View voice activity statistics\n" +
                     "`!voicehelp` - Detailed voice system help", false)
 
-                .AddField("★ **Utilities**",
-                    "`!sendit MESSAGE_ID to CHANNEL_ID` - Forward a message to another channel", false)
-
-                .AddField("★ ** BANK & ROBBERY SYSTEM**",
-                    "**Manage your money strategically!**\n" +
-                    "`!deposit <amount>` / `!dep all` - Deposit money safely in bank\n" +
-                    "`!withdraw <amount>` / `!with all` - Withdraw from bank\n" +
-                    "`!balance` / `!bal` - Check wallet + bank balance\n" +
-                    "`!rob @user` - Try to steal from wallet (risky! 40% success rate)\n" +
-                    "`!pay @user <amount>` - Send money to another user\n" +
-                    "→ *Bank money is SAFE from robbers!*\n" +
-                    "→ *Lose money if robbery fails!*", false)
-
-                .AddField("★ **Bump Reminders**",
-                    "`!bumpreminder on/off` - Enable/disable bump reminders\n" +
-                    "`!bumpstatus` - Show bump reminder status\n" +
-                    "→ Automatically reminds you every 2 hours when server can be bumped\n" +
-                    "→ Works with Disboard bot for server promotion", false)
-
-                .AddField("★ **Birthday System**",
-                    "`!birthdaychannel [CHANNEL_ID or !new-birthchan]` - Set/create birthday channel *(Admin)*\n" +
-                    "`!birthdayset [dd.mm.yyyy]` - Save your birthday (format: 25.12.1995)\n" +
-                    "`!birthdayremove` / `!mybirthdayremove` - Remove your birthday\n" +
-                    "`!mybirthdayinfo` - View your saved birthday\n" +
-                    "`!birthdaylist` - View all birthdays sorted by date *(Admin)*", false)
-
-                .AddField("★ **Giveaway System**",
-                    "`!gcreate <Zeit> <Gewinner> <Preis>` - Erstelle ein Giveaway (z.B. !gcreate 1h 1 Discord Nitro)\n" +
-                    "`!gend <Message ID>` - Beende Giveaway vorzeitig\n" +
-                    "`!greroll <Message ID>` - Wähle neue Gewinner\n" +
-                    "`!glist` - Zeige alle aktiven Giveaways\n" +
-                    "`!ghelp` - Detaillierte Giveaway-Hilfe\n" +
-                    "→ Reagiere mit 🎉 um an Giveaways teilzunehmen!", false)
-
                 .AddField("★ **XP & Level System**",
                     "`!run-xp-setup` - XP-System einrichten (erstellt alle Rollen)\n" +
                     "`!remove-xp-setup` - XP-System entfernen\n" +
@@ -132,6 +72,45 @@ namespace MainbotCSharp.Modules
                     "`!rank-channel-off` - Level-Up Nachrichten deaktivieren\n" +
                     "`!rank-channel-status` - Status des Rank-Channels anzeigen\n" +
                     "→ Sammle XP durch Chatten und Voice-Aktivität!", false)
+
+                .AddField("★ **Giveaway System**",
+                    "`!gcreate <Zeit> <Gewinner> <Preis>` - Erstelle ein Giveaway (z.B. !gcreate 1h 1 Discord Nitro)\n" +
+                    "`!gend <Message ID>` - Beende Giveaway vorzeitig\n" +
+                    "`!greroll <Message ID>` - Wähle neue Gewinner\n" +
+                    "`!glist` - Zeige alle aktiven Giveaways\n" +
+                    "`!ghelp` - Detaillierte Giveaway-Hilfe\n" +
+                    "→ Reagiere mit 🎉 um an Giveaways teilzunehmen!", false)
+
+                .AddField("★ **Bump Reminders**",
+                    "`!bumpreminder on/off` - Enable/disable bump reminders\n" +
+                    "`!bumpstatus` - Show bump reminder status\n" +
+                    "→ Automatically reminds you every 2 hours when server can be bumped\n" +
+                    "→ Works with Disboard bot for server promotion", false)
+
+                .AddField("★ **Utilities**",
+                    "`!sendit MESSAGE_ID to CHANNEL_ID` - Forward a message to another channel", false)
+
+                .AddField("★ **Birthday System**",
+                    "`!birthdaychannel [CHANNEL_ID or !new-birthchan]` - Set/create birthday channel *(Admin)*\n" +
+                    "`!birthdayset [dd.mm.yyyy]` - Save your birthday (format: 25.12.1995)\n" +
+                    "`!birthdayremove` / `!mybirthdayremove` - Remove your birthday\n" +
+                    "`!mybirthdayinfo` - View your saved birthday\n" +
+                    "`!birthdaylist` - View all birthdays sorted by date *(Admin)*", false)
+
+                .AddField("★ **Economy System**",
+                    "`!daily` - Collect your daily credits\n" +
+                    "`!balance` / `!bal` - Check wallet + bank balance\n" +
+                    "`!deposit <amount>` / `!dep all` - Deposit money safely in bank\n" +
+                    "`!withdraw <amount>` / `!with all` - Withdraw from bank\n" +
+                    "`!pay @user <amount>` - Send money to another user\n" +
+                    "`!rob @user` - Try to steal from wallet (risky! 40% success rate)\n" +
+                    "→ *Bank money is SAFE from robbers!*", false)
+
+                .AddField("★ **Casino & Gambling**",
+                    "`!coinflip <bet> <heads/tails>` - Coin flip with animation\n" +
+                    "`!dice <bet> <prediction> [6/20/100]` - Multi-sided dice casino\n" +
+                    "`!slots <bet>` - Slot machine with jackpot chance\n" +
+                    "→ *Anti-addiction smart betting limits built-in*", false)
 
                 .WithImageUrl("https://imgur.com/aYh8OAq.png")
                 .WithFooter("Code.Master() BOT - THE ULTIMATE FREE EXPERIENCE! DESTROYS NOCTALY, ZENIA VOICE, SAPPHIRE & TICKET KING", "https://i.imgur.com/7mkVUuO.png")
