@@ -12,27 +12,6 @@ Please read the [LICENSE](LICENSE) before you copy code or fork it.
 
 ---
 
-## 📦 Requirements
-
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- A Discord Bot Token ([Discord Developer Portal](https://discord.com/developers/applications))
-
----
-
-## 🚀 Getting Started
-
-1. Clone the repository
-2. Create a `.env` file in `C-Main/` with your bot token:
-   ```
-   TOKEN=your_bot_token_here
-   ```
-3. Run the bot:
-   ```bash
-   dotnet run --project C-Main/Mainbot.csproj
-   ```
-
----
-
 ## 🎮 Features & Commands
 
 ---
@@ -188,28 +167,6 @@ Gambling games with anti-addiction limits built in.
 !coinflip 100 heads       → Bet on a coin flip
 !dice 200 15 20           → Roll a 20-sided dice and guess the number
 !slots 500                → Spin the slot machine with jackpot chance
-```
-
----
-
-## 📁 Project Structure
-
-```
-C-Main/
-├── Modules/          # All command modules
-│   ├── XPSystem.cs
-│   ├── TicketCommands.cs
-│   ├── VoiceCommands.cs
-│   ├── GiveawayCommands.cs
-│   ├── BirthdayCommands.cs
-│   ├── SecurityCommands.cs
-│   ├── VerifyCommands.cs
-│   └── ...
-├── Services/         # Background services
-│   ├── EconomyService.cs
-│   ├── GiveawayService.cs
-│   └── BumpReminderService.cs
-└── Program.cs        # Entry point & bot setup
 ```
 
 ---
