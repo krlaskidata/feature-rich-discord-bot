@@ -1,0 +1,124 @@
+# Contributing to C-Main
+
+Thank you for your interest in the C-Main project!
+
+⚠️ **Please read this carefully** – this is NOT a traditional open-source project.
+
+---
+
+## What You CAN Do
+
+✅ **Study & Learn**
+- Read the code and understand the architecture
+- Ask questions in discussions
+- Share what you learned (with attribution)
+- Reference specific patterns in your own projects (with credit)
+
+✅ **Use the C-Main Bot**
+- Add the official bot to your Discord server
+- All bot features are free to use
+- Link: https://discord.com/oauth2/authorize?client_id=1435244593301159978&permissions=8&integration_type=0&scope=bot
+- Simply click and invite to your server!
+
+✅ **Report Issues**
+- Found a bug? Report it via Issues
+- Security vulnerability? Contact maintainers privately
+- Documentation improvements? Suggest them
+
+✅ **Discuss Design**
+- Ask questions about architectural decisions
+- Share feedback on code patterns
+- Participate in technical discussions
+
+---
+
+## What You CANNOT Do
+
+❌ **Copy the Code**
+- Don't use this code (or significant portions) in your bot
+- Don't copy any files from this repository
+- Don't use binaries, DLL files, or build artifacts
+- Don't fork and claim as your own work
+- Don't redistribute modified versions
+
+❌ **Use for Commercial Purposes**
+- You cannot use this code to build commercial products
+- You cannot use it as a template for bot hosting services
+- You cannot sell bots based on this architecture
+
+❌ **Remove Attribution**
+- Always credit the C-Main project
+- Don't claim design patterns as your original work
+
+---
+
+## Proper Attribution
+
+If you implement a pattern from this project, include:
+
+```markdown
+Inspired by C-Main - Feature-Rich Discord Bot Architecture
+https://github.com/krlaskidata/feature-rich-discord-bot
+```
+
+Or in code comments:
+
+```csharp
+// Pattern inspired by C-Main (feature-rich-discord-bot)
+// https://github.com/krlaskidata/feature-rich-discord-bot
+```
+
+---
+
+## Reporting Issues
+
+### Bugs
+1. Describe the issue clearly
+2. Provide steps to reproduce
+3. Include error messages or logs
+4. Note your .NET version
+
+### Security Vulnerabilities
+⚠️ **DO NOT** open a public issue for security problems
+
+Instead:
+1. Contact the maintainers privately
+2. Describe the vulnerability
+3. Allow time for a patch
+4. You'll be credited in the security advisory
+
+---
+
+## Code of Conduct
+
+By participating in this project, you agree to:
+- Respect the proprietary nature of this codebase
+- Not attempt to circumvent the license
+- Be respectful in all discussions
+- Follow Discord's Terms of Service
+
+---
+
+## License Reminder
+
+```
+This repository is provided for EDUCATIONAL PURPOSES ONLY.
+
+You MAY:     View, study, learn from, and discuss the code
+You MAY NOT: Copy, modify, redistribute, or commercialize
+
+See LICENSE for full details.
+```
+
+---
+
+## Questions?
+
+- 📖 Check the README first
+- 🔍 Review existing issues and discussions
+- 💬 Ask respectfully in Issues
+
+---
+
+**Remember:** Great developers inspire each other by building something original,
+not by copying code. Build something amazing of your own! 💀
