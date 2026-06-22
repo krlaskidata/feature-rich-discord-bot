@@ -1,39 +1,57 @@
-Copyright (c) 2026 krlaskidata / ozzgrl
+# PROPRIETARY AND CONFIDENTIAL LICENSE
 
-All rights reserved.
+## C-Main – Feature-Rich Discord Bot
 
-TERMS AND CONDITIONS
-
-1. PERMITTED USE
-   - You may use the hosted bot directly by inviting it via the official OAuth link:
-     https://discord.com/oauth2/authorize?client_id=1435244593301159978&permissions=8&integration_type=0&scope=bot
-   - You may add the bot to your own Discord server for private, non-commercial use.
-
-2. PROHIBITED USE
-   - You may NOT copy, reproduce, distribute, or publish this source code, in whole or in part.
-   - You may NOT modify, adapt, translate, or create derivative works based on this source code.
-   - You may NOT use this code to build, host, or operate your own bot — whether identical or similar.
-   - You may NOT sell, license, sublicense, rent, or otherwise commercialize this software or any
-     derivative work of it.
-   - You may NOT use this software or any part of it for harmful, destructive, or malicious purposes,
-     including but not limited to server raids, mass deletion of content ("nuking"), or targeted abuse.
-   - You may NOT claim ownership or authorship of this software or any part of it.
-
-3. NO REDISTRIBUTION
-   This software may not be redistributed in source or binary form, with or without modification.
-
-4. NO WARRANTY
-   THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
-   THE AUTHOR SHALL NOT BE LIABLE FOR ANY DAMAGES OR LIABILITY ARISING FROM THE USE
-   OR MISUSE OF THIS SOFTWARE.
-
-5. ENFORCEMENT
-   Any violation of these terms automatically terminates your right to use this software.
-   The author reserves the right to take legal action in case of violations.
+© 2026 krlaskidata / ozzgrl – All Rights Reserved
 
 ---
 
-Kurzfassung (Deutsch):
-Du darfst den Bot über den offiziellen Link nutzen und auf deinen privaten Server einladen.
-Du darfst den Code NICHT kopieren, verändern, weiterverbreiten oder eigene Bots damit bauen.
-Kommerzielle Nutzung sowie destruktiver Einsatz (z. B. Server-Nuke) sind ausdrücklich verboten.
+## GRANT OF LICENSE
+
+This repository is provided for **educational and reference purposes only**. You may:
+
+✅ **VIEW** the code structure and implementation patterns
+✅ **STUDY** the architecture and security practices
+✅ **LEARN** from the code organization and Discord.NET usage
+✅ **DISCUSS** implementation details in community forums
+✅ **USE THE BOT** – Add C-Main to your Discord server using the official bot link
+
+### Using the C-Main Bot
+
+You are **fully permitted** to use the official bot deployment:
+
+🔗 **[Add C-Main to Your Server](https://discord.com/oauth2/authorize?client_id=1435244593301159978&permissions=8&integration_type=0&scope=bot)**
+
+Simply click the link above and select your server. The bot is fully functional and ready to use!
+
+---
+
+## RESTRICTIONS
+
+You may **NOT**:
+
+❌ **COPY** or reproduce any significant portions of code
+❌ **USE** this code, in whole or in part, in your own projects
+❌ **COPY FILES** – Do not reproduce, duplicate, or reuse any files from this repository
+❌ **USE BINARIES** – Do not use compiled DLL/EXE files or build artifacts
+❌ **MODIFY** and redistribute this code
+❌ **CREATE** derivative works based on this codebase
+❌ **COMMERCIALIZE** any software derived from this code
+❌ **CLAIM OWNERSHIP** of the architectural patterns or implementations
+
+---
+
+## DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+THE AUTHOR SHALL NOT BE LIABLE FOR ANY DAMAGES OR LOSSES ARISING
+FROM THE USE OR INABILITY TO USE THIS SOFTWARE.
+
+---
+
+## ATTRIBUTION
+
+If you reference design patterns or concepts from this repository,
+proper attribution to the **C-Main** project is required.
+
+**Questions? Contact the repository maintainers.**
