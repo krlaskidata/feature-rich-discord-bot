@@ -26,97 +26,71 @@ namespace MainbotCSharp.Modules
         public async Task HelpAsync()
         {
             var embed = new EmbedBuilder()
-                .WithTitle("**Code.Master()**")
+                .WithTitle("Code.Master() - Feature-Rich Discord Bot")
                 .WithColor(0x40E0D0)
-                .WithDescription("*This bot is a community bot and can only be used upon admin request. *More features, better performance, superior design!*")
-                .AddField("★ **Security Commands**",
-                    "**Setup / Status**\n" +
-                    "`!setsecuritymod` - Security einrichten (Log-Channel setzen/erstellen) und aktivieren\n" +
-                    "`!disable` - Security deaktivieren\n" +
-                    "`!status` - Security Status anzeigen (enabled, logchannel, timeout settings, etc.)\n\n" +
-                    "**Cleanup (Channel)**\n" +
-                    "`!cleanup-now` - löscht Nachrichten im aktuellen Channel\n" +
-                    "`!cleanup-intervall <channelId> [interval]` - Auto-Cleanup Intervall setzen (Aliases: !setcleanupinterval)\n" +
-                    "→ Beispiele: 1h, 10h, 5d\n" +
-                    "`!delcleanup-intervall <channelId>` - Auto-Cleanup Intervall entfernen (Aliases: !cleanupdel, !removecleanupinterval)\n\n" +
-                    "**Danger Zone (Owner-only + confirmation)**\n" +
-                    "`!cleanup-server-ultra` - löscht ALLE Channels + Kategorien (nur Owner + Bestätigungsphrase)", false)
-
-                .AddField("★ **Ticket System**",
-                    "`!ticket-setup` - Interactive setup: Configure ticket system\n" +
-                    "`!set-support [ROLE_ID]` - Set support role for ticket management\n" +
-                    "`!ticket-close` - Close the current ticket\n" +
-                    "`!ticket-status` - Show ticket system status\n" +
-                    "`!ticket-transcript` - Generate transcript for ticket\n" +
-                    "`!del-ticket-system` - Remove ticket system configuration", false)
-
-                .AddField("★ **Voice Features**",
-                    "`!voicesetup [log-channel-id] [voice-category-id] [role-id]` - Complete voice system setup\n" +
-                    "`!create [category-id]` - Create Join-to-Create channel\n" +
-                    "`!voice-cleanup` - Clean up all empty voice channels (Admin)\n" +
-                    "`!remove-voice-setup` - Disable voice system (keeps channels)\n" +
-                    "`!voicename [name]` - Rename your voice channel\n" +
-                    "`!voicelimit [0-99]` - Set user limit (0=unlimited)\n" +
-                    "`!voiceprivate` - Make your channel private\n" +
-                    "`!voicepublic` - Make your channel public\n" +
-                    "`!voicetemplate [name]` - Save/load voice channel template\n" +
-                    "`!voicestats` - View voice activity statistics\n" +
-                    "`!voicehelp` - Detailed voice system help", false)
-
-                .AddField("★ **XP & Level System**",
-                    "`!run-xp-setup` - XP-System einrichten (erstellt alle Rollen)\n" +
-                    "`!remove-xp-setup` - XP-System entfernen\n" +
-                    "`!xp [user]` - XP-Status anzeigen\n" +
-                    "`!xp-give @user <amount>` - **ADMIN:** Grant XP to user (max 1M)\n" +
-                    "`!set-rank-channel #channel` - Level-Up Nachrichten Channel setzen\n" +
-                    "`!rank-channel-off` - Level-Up Nachrichten deaktivieren\n" +
-                    "`!rank-channel-status` - Status des Rank-Channels anzeigen\n" +
-                    "→ Sammle XP durch Chatten und Voice-Aktivität!", false)
-
-                .AddField("★ **Giveaway System**",
-                    "`!gcreate <Zeit> <Gewinner> <Preis>` - Erstelle ein Giveaway (z.B. !gcreate 1h 1 Discord Nitro)\n" +
-                    "`!gend <Message ID>` - Beende Giveaway vorzeitig\n" +
-                    "`!greroll <Message ID>` - Wähle neue Gewinner\n" +
-                    "`!glist` - Zeige alle aktiven Giveaways\n" +
-                    "`!ghelp` - Detaillierte Giveaway-Hilfe\n" +
-                    "→ Reagiere mit 🎉 um an Giveaways teilzunehmen!", false)
-
-                .AddField("★ **Bump Reminders**",
-                    "`!bumpreminder on/off` - Enable/disable bump reminders\n" +
-                    "`!bumpstatus` - Show bump reminder status\n" +
-                    "→ Automatically reminds you every 2 hours when server can be bumped\n" +
-                    "→ Works with Disboard bot for server promotion", false)
-
-                .AddField("★ **Utilities**",
-                    "`!sendit MESSAGE_ID to CHANNEL_ID` - Forward a message to another channel", false)
-
-                .AddField("★ **Birthday System**",
-                    "`!birthdaychannel [CHANNEL_ID or !new-birthchan]` - Set/create birthday channel *(Admin)*\n" +
-                    "`!birthdayset [dd.mm.yyyy]` - Save your birthday (format: 25.12.1995)\n" +
-                    "`!birthdayremove` / `!mybirthdayremove` - Remove your birthday\n" +
-                    "`!mybirthdayinfo` - View your saved birthday\n" +
-                    "`!birthdaylist` - View all birthdays sorted by date *(Admin)*", false)
-
-                .AddField("★ **Economy System**",
-                    "`!daily` - Collect your daily credits\n" +
-                    "`!balance` / `!bal` - Check wallet + bank balance\n" +
-                    "`!deposit <amount>` / `!dep all` - Deposit money safely in bank\n" +
-                    "`!withdraw <amount>` / `!with all` - Withdraw from bank\n" +
-                    "`!pay @user <amount>` - Send money to another user\n" +
-                    "`!rob @user` - Try to steal from wallet (risky! 40% success rate)\n" +
-                    "→ *Bank money is SAFE from robbers!*", false)
-
-                .AddField("★ **Casino & Gambling**",
-                    "`!coinflip <bet> <heads/tails>` - Coin flip with animation\n" +
-                    "`!dice <bet> <prediction> [6/20/100]` - Multi-sided dice casino\n" +
-                    "`!slots <bet>` - Slot machine with jackpot chance\n" +
-                    "→ *Anti-addiction smart betting limits built-in*", false)
-
-                .WithImageUrl("https://imgur.com/aYh8OAq.png")
-                .WithFooter("Code.Master() BOT - THE ULTIMATE FREE EXPERIENCE! DESTROYS NOCTALY, ZENIA VOICE, SAPPHIRE & TICKET KING", "https://i.imgur.com/7mkVUuO.png")
+                .WithDescription("*A powerful, fully free Discord bot built with C# and Discord.NET - featuring an economy, XP system, tickets, giveaways, voice management, verification, and more.*\n\n--------------------------\n**Features & Commands**")
+                .AddField("Security System",
+                    "`!setsecuritymod` -> Set up security (creates log channel, activates system)\n" +
+                    "`!status` -> Show security system status\n" +
+                    "`!disable` -> Disable security system\n" +
+                    "`!security-filters` -> Shows all security filters, categories and consequences\n" +
+                    "`!cleanup-now` -> Delete all messages in the current channel\n" +
+                    "`!cleanup-intervall <ch> 2h` -> Auto-delete messages in a channel every 2h\n" +
+                    "`!delcleanup-intervall <ch>` -> Remove auto-cleanup from a channel", false)
+                .AddField("Ticket System",
+                    "`!ticket-setup` -> Interactive setup wizard\n" +
+                    "`!set-support @role` -> Set the support role for ticket management\n" +
+                    "`!ticket-close` -> Close the current ticket\n" +
+                    "`!ticket-transcript` -> Generate a full transcript of the ticket\n" +
+                    "`!ticket-status` -> Show current ticket system status\n" +
+                    "`!del-ticket-system` -> Remove ticket system configuration", false)
+                .AddField("Voice System",
+                    "`!voicesetup` -> Full voice system setup\n" +
+                    "`!create [category-id]` -> Create a Join-to-Create channel\n" +
+                    "`!voicename CoolRoom` -> Rename your voice channel\n" +
+                    "`!voicelimit 5` -> Set a user limit (0 = unlimited)\n" +
+                    "`!voiceprivate` -> Make your channel private\n" +
+                    "`!voicepublic` -> Make your channel public\n" +
+                    "`!voicestats` -> View your voice activity statistics\n" +
+                    "`!voice-cleanup` -> (Admin) Remove all empty voice channels", false)
+                .AddField("XP & Level System",
+                    "`!run-xp-setup` -> Set up the XP system (creates all roles)\n" +
+                    "`!xp` -> View your current XP and rank\n" +
+                    "`!xp @user` -> View another user's XP\n" +
+                    "`!xp-give @user 500` -> (Admin) Grant XP to a user\n" +
+                    "`!set-rank-channel #ch` -> Set channel for level-up notifications\n" +
+                    "`!remove-xp-setup` -> Disable the XP system", false)
+                .AddField("Verification System",
+                    "`!verify-setup @role` -> Set up verification in this channel\n" +
+                    "`!verify-setup @role #log-channel` -> Set verification with logging", false)
+                .AddField("Giveaway System",
+                    "`!gcreate 1h 1 Discord Nitro` -> Create a 1-hour giveaway with 1 winner\n" +
+                    "`!gend <message-id>` -> End a giveaway early\n" +
+                    "`!greroll <message-id>` -> Re-roll and pick new winners\n" +
+                    "`!glist` -> List all active giveaways", false)
+                .AddField("**Further Features**",
+                    "**Bump Reminder**\n" +
+                    "`!bumpreminder on` -> Enable bump reminders\n" +
+                    "`!bumpreminder off` -> Disable bump reminders\n" +
+                    "`!bumpstatus` -> Check reminder status\n\n" +
+                    "**Utilities**\n" +
+                    "`!ping` -> Check bot latency\n" +
+                    "`!info` -> Show bot information\n" +
+                    "`!sendit <msg-id> to <ch-id>` -> Forward a message to another channel\n\n" +
+                    "**Birthday System**\n" +
+                    "`!birthdayset 25.12.1995` -> Save your birthday\n" +
+                    "`!mybirthdayinfo` -> View your saved birthday\n" +
+                    "`!birthdaychannel #channel` -> (Admin) Set the birthday announcement channel\n" +
+                    "`!birthdaylist` -> (Admin) View all saved birthdays sorted by date\n" +
+                    "`!birthdayremove` -> Remove your birthday", false)
+                .WithImageUrl("https://media.discordapp.net/attachments/1410334562361409600/1517468865456771092/standard.gif?ex=6a366482&is=6a351302&hm=b4b4bb48dea3c1b0e76e6537e1c43ec1331a736be2f85afd06b88d1e2729b167&=")
                 .WithCurrentTimestamp();
 
-            await ReplyAsync(embed: embed.Build());
+            var components = new ComponentBuilder()
+                .WithButton("LICENSE", style: ButtonStyle.Link, url: "https://github.com/krlaskidata/feature-rich-discord-bot/blob/master/LICENSE")
+                .Build();
+
+            await ReplyAsync(embed: embed.Build(), components: components);
         }
 
         [Command("info")]
@@ -286,6 +260,7 @@ namespace MainbotCSharp.Modules
         }
 
         [Command("bumpreminder")]
+        [RequireUserPermissionOrBotOwner(GuildPermission.Administrator)]
         [Summary("Toggle bump reminders")]
         public async Task BumpReminderAsync(string? action = null)
         {
@@ -469,7 +444,13 @@ namespace MainbotCSharp.Modules
                     }
                 }
 
-                await ReplyAsync($"✅ Message forwarded to {targetChannel.Mention}!");
+                try
+                {
+                    await Context.Message.DeleteAsync();
+                }
+                catch
+                {
+                }
             }
             catch (Exception ex)
             {

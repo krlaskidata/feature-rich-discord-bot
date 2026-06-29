@@ -22,8 +22,8 @@ namespace MainbotCSharp.Modules
     {
         private const string BIRTHDAYS_FILE = "birthdays.json";
         private static Dictionary<ulong, BirthdayData> _guildBirthdays = LoadBirthdayData();
-        private static System.Threading.Timer _dailyTimer;
-        private static DiscordSocketClient _client;
+        private static System.Threading.Timer? _dailyTimer;
+        private static DiscordSocketClient? _client;
 
         private static Dictionary<ulong, BirthdayData> LoadBirthdayData()
         {
@@ -165,11 +165,14 @@ namespace MainbotCSharp.Modules
                             // Try to download user info if not in cache
                             try
                             {
-                                var restUser = await _client.GetUserAsync(userId);
-                                if (restUser != null)
+                                if (_client != null)
                                 {
-                                    Console.WriteLine($"✅ Downloaded user: {restUser.Username} ({userId})");
-                                    hasChanges = true;
+                                    var restUser = await _client.GetUserAsync(userId);
+                                    if (restUser != null)
+                                    {
+                                        Console.WriteLine($"✅ Downloaded user: {restUser.Username} ({userId})");
+                                        hasChanges = true;
+                                    }
                                 }
                             }
                             catch

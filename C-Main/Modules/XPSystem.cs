@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
+using MainbotCSharp.Services;
 
 namespace MainbotCSharp.Modules
 {
@@ -127,7 +128,7 @@ namespace MainbotCSharp.Modules
         }
 
         [Command("xp")]
-        public async Task CheckXP(SocketUser user = null)
+        public async Task CheckXP(SocketUser? user = null)
         {
             user = user ?? Context.User;
             var userData = await _xpService.GetUserData(Context.Guild.Id, user.Id);
@@ -301,7 +302,7 @@ namespace MainbotCSharp.Modules
         [Alias("set-level-channel", "rank-channel")]
         [Summary("Setze den Channel für Level-Up Nachrichten")]
         [RequireUserPermission(GuildPermission.ManageMessages)]
-        public async Task SetRankChannelAsync(ITextChannel channel = null)
+        public async Task SetRankChannelAsync(ITextChannel? channel = null)
         {
             if (channel == null)
             {
@@ -631,7 +632,10 @@ namespace MainbotCSharp.Modules
             userData.UpdateTotalXP();
             
             SaveUserData(guildId, userId, userData);
-            await UpdateUserRoles(((SocketGuildChannel)message.Channel).Guild, message.Author as SocketGuildUser);
+            if (message.Author is SocketGuildUser guildUser)
+            {
+                await UpdateUserRoles(((SocketGuildChannel)message.Channel).Guild, guildUser);
+            }
         }
 
         public async Task HandleVoiceUpdate(SocketUser user, SocketVoiceState before, SocketVoiceState after)
@@ -666,6 +670,28 @@ namespace MainbotCSharp.Modules
                     if (user is SocketGuildUser guildUser)
                     {
                         await UpdateUserRoles(guildUser.Guild, guildUser);
+                    }
+                }
+            }
+        }
+
+        public async Task RestoreVoiceSessions(IReadOnlyCollection<SocketGuild> guilds)
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var guild in guilds)
+            {
+                foreach (var channel in guild.VoiceChannels)
+                {
+                    foreach (var member in channel.Users)
+                    {
+                        if (member.IsBot) continue;
+                        var userData = await GetUserData(guild.Id, member.Id);
+                        if (!userData.LastVoiceJoin.HasValue)
+                        {
+                            userData.LastVoiceJoin = now;
+                            SaveUserData(guild.Id, member.Id, userData);
+                            Console.WriteLine($"Restored voice session for {member.Username} in {channel.Name}");
+                        }
                     }
                 }
             }
@@ -864,7 +890,7 @@ namespace MainbotCSharp.Modules
             try
             {
                 var json = JsonSerializer.Serialize(_guildConfigs, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(GUILD_CONFIG_FILE, json);
+                AtomicFileStore.WriteAllTextAtomic(GUILD_CONFIG_FILE, json);
             }
             catch (Exception ex)
             {
@@ -1061,7 +1087,7 @@ namespace MainbotCSharp.Modules
                 CleanupInactiveUsers();
                 
                 var json = JsonSerializer.Serialize(_userData, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(XP_DATA_FILE, json);
+                AtomicFileStore.WriteAllTextAtomic(XP_DATA_FILE, json);
             }
             catch (Exception ex)
             {

@@ -115,7 +115,7 @@ namespace MainbotCSharp.Services
                 CleanupInactiveUsers();
                 
                 var json = JsonSerializer.Serialize(_economyData, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(ECONOMY_FILE, json);
+                AtomicFileStore.WriteAllTextAtomic(ECONOMY_FILE, json);
             }
             catch (Exception ex)
             {
