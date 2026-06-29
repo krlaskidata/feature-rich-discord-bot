@@ -10,7 +10,27 @@ namespace MainbotCSharp
 {
     public class Bot
     {
-        private const string BOT_INVITE_LINK = "https://discord.com/oauth2/authorize?client_id=1435244593301159978&permissions=8&integration_type=0&scope=bot";
+        // Scoped permissions instead of Administrator (permissions=8)
+        private const string BOT_INVITE_LINK = "https://discord.com/oauth2/authorize?client_id=1435244593301159978&permissions=1099812957271&integration_type=0&scope=bot";
+        private static readonly GuildPermission[] RequiredGuildPermissions =
+        {
+            GuildPermission.ViewChannel,
+            GuildPermission.SendMessages,
+            GuildPermission.EmbedLinks,
+            GuildPermission.AttachFiles,
+            GuildPermission.ReadMessageHistory,
+            GuildPermission.AddReactions,
+            GuildPermission.ManageMessages,
+            GuildPermission.ManageChannels,
+            GuildPermission.ManageRoles,
+            GuildPermission.CreateInstantInvite,
+            GuildPermission.ModerateMembers,
+            GuildPermission.Connect,
+            GuildPermission.Speak,
+            GuildPermission.MoveMembers,
+            GuildPermission.MuteMembers,
+            GuildPermission.DeafenMembers
+        };
         
         private readonly DiscordSocketClient _client;
         private readonly CommandService _commands;
@@ -46,7 +66,8 @@ namespace MainbotCSharp
             _client.UserVoiceStateUpdated += async (user, before, after) => 
             {
                 var xpService = _services.GetService<XPService>();
-                await xpService.HandleVoiceUpdate(user, before, after);
+                if (xpService != null)
+                    await xpService.HandleVoiceUpdate(user, before, after);
             };
             _client.UserJoined += async (user) =>
             {
@@ -59,7 +80,7 @@ namespace MainbotCSharp
                     Console.WriteLine($"Security HandleUserJoined error: {ex.Message}");
                 }
             };
-
+            _client.JoinedGuild += OnJoinedGuild;
         }
 
         public async Task InitializeAsync()
@@ -67,8 +88,12 @@ namespace MainbotCSharp
             var token = Environment.GetEnvironmentVariable("MAINBOT_TOKEN");
             if (string.IsNullOrWhiteSpace(token))
             {
-                Console.WriteLine("ERROR: Please set environment variable MAINBOT_TOKEN with your bot token.");
-                return;
+                throw new InvalidOperationException("Missing required environment variable MAINBOT_TOKEN.");
+            }
+
+            if (!ValidateConfiguration())
+            {
+                throw new InvalidOperationException("Invalid bot configuration. Check MAINBOT_OWNERS and MAINBOT_ALLOWED_GUILDS.");
             }
 
             await _commands.AddModulesAsync(Assembly.GetExecutingAssembly(), _services);
@@ -81,6 +106,17 @@ namespace MainbotCSharp
         {
             Console.WriteLine($"Mainbot ready. Logged in as {_client.CurrentUser}");
             await _client.SetActivityAsync(new Game("Managing the server"));
+
+            await CheckAndLeaveUnauthorizedServers();
+            LogMissingGuildPermissions();
+
+            try
+            {
+                var xpService = _services.GetService<XPService>();
+                if (xpService != null)
+                    await xpService.RestoreVoiceSessions(_client.Guilds);
+            }
+            catch (Exception ex) { Console.WriteLine("RestoreVoiceSessions error: " + ex); }
 
             try { await MainbotCSharp.Modules.VoiceService.StartBackgroundTasks(_client); } catch (Exception ex) { Console.WriteLine("VoiceService start error: " + ex); }
 
@@ -102,7 +138,42 @@ namespace MainbotCSharp
                 Console.WriteLine("BumpReminderService initialization error: " + ex);
             }
 
+            try
+            {
+                MainbotCSharp.Modules.SecurityService.RestoreCleanupTimers(_client);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("SecurityService RestoreCleanupTimers error: " + ex);
+            }
+
             // PingService is now handled by separate C-Ping bot
+        }
+
+        private void LogMissingGuildPermissions()
+        {
+            foreach (var guild in _client.Guilds)
+            {
+                var currentUser = guild.CurrentUser;
+                if (currentUser == null)
+                {
+                    Console.WriteLine($"[PERMS] {guild.Name} ({guild.Id}): Could not resolve bot guild user.");
+                    continue;
+                }
+
+                var missing = RequiredGuildPermissions
+                    .Where(permission => !currentUser.GuildPermissions.Has(permission))
+                    .ToList();
+
+                if (missing.Count == 0)
+                {
+                    Console.WriteLine($"[PERMS] {guild.Name} ({guild.Id}): OK (all required guild permissions present).");
+                    continue;
+                }
+
+                Console.WriteLine(
+                    $"[PERMS] {guild.Name} ({guild.Id}): Missing guild permissions -> {string.Join(", ", missing)}");
+            }
         }
 
         private Task Client_Log(LogMessage msg)
@@ -119,83 +190,125 @@ namespace MainbotCSharp
 
         private async Task HandleMessageAsync(SocketMessage rawMessage)
         {
-            Console.WriteLine($"[DEBUG] Message received: Author={rawMessage.Author.Username} ({rawMessage.Author.Id}), Channel={rawMessage.Channel.Id}, Content='{rawMessage.Content}', IsBot={rawMessage.Author.IsBot}");
-            
+            if (!await MessageProtectionService.TryEnterMessagePipelineAsync())
+            {
+                Console.WriteLine("[THROTTLE] Message dropped due to overload.");
+                return;
+            }
+
             try
             {
-                BumpReminderService.HandleDisboardMessage(rawMessage);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("BumpReminderService HandleDisboardMessage error: " + ex);
-            }
+                Console.WriteLine($"[DEBUG] Message received: AuthorId={rawMessage.Author.Id}, ChannelId={rawMessage.Channel.Id}, ContentLength={rawMessage.Content?.Length ?? 0}, Attachments={rawMessage.Attachments.Count}, IsBot={rawMessage.Author.IsBot}");
+            
+                try
+                {
+                    BumpReminderService.HandleDisboardMessage(rawMessage);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("BumpReminderService HandleDisboardMessage error: " + ex);
+                }
 
             // PingService is now handled by separate C-Ping bot
 
-            try
-            {
-                await MainbotCSharp.Modules.SecurityService.HandleMessageAsync(rawMessage);
+                try
+                {
+                    await MainbotCSharp.Modules.SecurityService.HandleMessageAsync(rawMessage);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"SecurityService HandleMessageAsync error: {ex.Message}");
+                    return;
+                }
+
+                if (!(rawMessage is SocketUserMessage message)) return;
+                if (message.Author.IsBot) return;
+
+                try
+                {
+                    var xpService = _services.GetService<XPService>();
+                    if (xpService != null)
+                        await xpService.HandleMessage(message);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("XPService HandleMessage error: " + ex);
+                }
+
+                int argPos = 0;
+                if (!(message.HasCharPrefix('!', ref argPos) || message.HasMentionPrefix(_client.CurrentUser, ref argPos)))
+                {
+                    Console.WriteLine($"[DEBUG] Message without command prefix: AuthorId={message.Author.Id}, ChannelId={message.Channel.Id}, ContentLength={message.Content?.Length ?? 0}");
+                    return;
+                }
+
+                if (MessageProtectionService.IsCommandRateLimited(message.Author.Id))
+                {
+                    Console.WriteLine($"[THROTTLE] Command rate limit hit: AuthorId={message.Author.Id}, ChannelId={message.Channel.Id}");
+                    return;
+                }
+
+                var commandText = message.Content.Substring(argPos).Trim();
+                var commandName = commandText.Split(new[] { ' ', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault()
+                    ?.ToLower();
+
+                // Commands that EVERYONE can use (not just authorized users)
+                var allowedForEveryone = new[] {
+                    // Birthday System
+                    "birthdayset", "mybirthdayinfo", "birthdayremove", "birthdaylist",
+                    // XP System
+                    "xp", "checkxp", "leaderboard", "top",
+                    // Economy System
+                    "work", "daily", "balance", "bal", "profile", "rank",
+                    "coinflip", "dice", "slots", "blackjack",
+                    "deposit", "dep", "withdraw", "with", "rob", "pay",
+                    // Help Commands
+                    "help", "economy-help", "eco-help", "money-help", "mungahelpdesk",
+                    // Info Commands
+                    "info", "ping", "vs-noctaly",
+                    // Fun Commands
+                    "gm", "gn", "hi",
+                    // Security System (per-server, guild admins can configure)
+                    "setsecuritymod", "disable", "status",
+                    "security-filters", "security-rules", "sfilters",
+                    "close-sticket",
+                    "cleanup-now",
+                    "cleanup-intervall", "setcleanupinterval",
+                    "delcleanup-intervall", "cleanupdel", "removecleanupinterval",
+                    "give-love",
+                    // Verify System (per-server, admins & staff can use)
+                    "verify-setup", "verify", "unverify", "verify-status"
+                };
+
+                var isGuildAdmin = message.Author is SocketGuildUser guildMember && guildMember.GuildPermissions.Administrator;
+
+                if (!AuthorizedUsers.Contains(message.Author.Id) && !allowedForEveryone.Contains(commandName) && !isGuildAdmin)
+                {
+                    Console.WriteLine($"[AUTH] Unauthorized command attempt: AuthorId={message.Author.Id}, ChannelId={message.Channel.Id}, Command={commandName ?? "<unknown>"}");
+                    return;
+                }
+
+                if (message.Content.ToLower().StartsWith("!invite") && IsBotOwner(message.Author.Id))
+                {
+                    await HandleInviteCommand(message);
+                    return;
+                }
+
+                if (message.Content.ToLower().StartsWith("!server-invites") && IsBotOwner(message.Author.Id))
+                {
+                    await HandleServerInvitesCommand(message);
+                    return;
+                }
+
+                var context = new SocketCommandContext(_client, message);
+
+                await _commands.ExecuteAsync(context, argPos, _services);
             }
-            catch { }
-
-            if (!(rawMessage is SocketUserMessage message)) return;
-            if (message.Author.IsBot) return;
-
-            try
+            finally
             {
-                var xpService = _services.GetService<XPService>();
-                await xpService.HandleMessage(message);
+                MessageProtectionService.ExitMessagePipeline();
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("XPService HandleMessage error: " + ex);
-            }
-
-            int argPos = 0;
-            if (!(message.HasCharPrefix('!', ref argPos) || message.HasMentionPrefix(_client.CurrentUser, ref argPos)))
-            {
-                Console.WriteLine($"[DEBUG] Message '{message.Content}' doesn't have command prefix, but MessageReceived event was fired");
-                return;
-            }
-
-            var commandText = message.Content.Substring(argPos).Trim();
-            var commandName = commandText.Split(new[] { ' ', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries)
-                .FirstOrDefault()
-                ?.ToLower();
-
-            // Commands that EVERYONE can use (not just authorized users)
-            var allowedForEveryone = new[] { 
-                // Birthday System
-                "birthdayset", "mybirthdayinfo", "birthdayremove", "birthdaylist",
-                // XP System  
-                "xp", "checkxp", "leaderboard", "top",
-                // Economy System
-                "work", "daily", "balance", "bal", "profile", "rank", 
-                "coinflip", "dice", "slots", "blackjack",
-                "deposit", "dep", "withdraw", "with", "rob", "pay",
-                // Help Commands
-                "help", "economy-help", "eco-help", "money-help", "mungahelpdesk",
-                // Info Commands  
-                "info", "ping", "vs-noctaly",
-                // Fun Commands
-                "gm", "gn", "hi"
-            };
-            
-            if (!AuthorizedUsers.Contains(message.Author.Id) && !allowedForEveryone.Contains(commandName))
-            {
-                Console.WriteLine($"[AUTH] Unauthorized user {message.Author.Username} ({message.Author.Id}) tried to use command: {message.Content}");
-                return;
-            }
-
-            if (message.Content.ToLower().StartsWith("!invite") && IsBotOwner(message.Author.Id))
-            {
-                await HandleInviteCommand(message);
-                return;
-            }
-
-            var context = new SocketCommandContext(_client, message);
-
-            await _commands.ExecuteAsync(context, argPos, _services);
         }
 
         private async Task InteractionCreatedAsync(SocketInteraction interaction)
@@ -248,6 +361,18 @@ namespace MainbotCSharp
                         await TicketService.HandleButtonInteraction(comp);
                         return;
                     }
+
+                    if (customId == "verify_button")
+                    {
+                        await VerifyService.HandleVerifyButtonAsync(comp);
+                        return;
+                    }
+
+                    if (customId.StartsWith("security_appeal|", StringComparison.Ordinal))
+                    {
+                        await MainbotCSharp.Modules.SecurityService.HandleSecurityAppealInteractionAsync(comp);
+                        return;
+                    }
                 }
             }
             catch (Exception ex)
@@ -261,6 +386,12 @@ namespace MainbotCSharp
         {
             try
             {
+                if (MainBotInvites.Count == 0)
+                {
+                    await message.Channel.SendMessageAsync("No server invites configured. Set MAINBOT_INVITES in environment variables.");
+                    return;
+                }
+
                 await message.Channel.SendMessageAsync("🤖 **Main Bot Auto-Join Starting...**\n" +
                     "I will now attempt to join all my designated servers!");
 
@@ -308,28 +439,271 @@ namespace MainbotCSharp
             }
         }
 
-        private static readonly ulong[] AuthorizedUsers = {
-            1105877268775051316UL,
-        };
+        private async Task HandleServerInvitesCommand(SocketUserMessage message)
+        {
+            try
+            {
+                if (!EnableServerInviteExport)
+                {
+                    await message.Channel.SendMessageAsync("⛔ `!server-invites` is disabled. Set MAINBOT_ENABLE_SERVER_INVITES_EXPORT=true to enable it.");
+                    return;
+                }
 
-        private static readonly ulong[] BotOwners = {
-            1105877268775051316UL,
-        };
+                if (!message.Content.Trim().Equals("!server-invites confirm", StringComparison.OrdinalIgnoreCase))
+                {
+                    await message.Channel.SendMessageAsync("⚠️ Confirmation required. Run `!server-invites confirm`.");
+                    return;
+                }
+
+                var lines = new System.Text.StringBuilder();
+                lines.AppendLine("**INVITES FOR ALLOWED SERVERS ONLY**");
+
+                foreach (var guild in _client.Guilds)
+                {
+                    if (!AllowedGuilds.Contains(guild.Id))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var channel = guild.TextChannels
+                            .Where(c => c.GetPermissionOverwrite(guild.EveryoneRole)?.SendMessages != PermValue.Deny)
+                            .OrderBy(c => c.Position)
+                            .FirstOrDefault();
+
+                        if (channel == null)
+                        {
+                            lines.AppendLine($"- {guild.Name} — no accessible channel");
+                            continue;
+                        }
+
+                        var invite = await channel.CreateInviteAsync(maxAge: 600, maxUses: 1, isUnique: true);
+                        lines.AppendLine($"- {guild.Name} — https://discord.gg/{invite.Code}");
+                    }
+                    catch
+                    {
+                        lines.AppendLine($"- {guild.Name} — could not create invite");
+                    }
+                }
+
+                await message.Author.SendMessageAsync(lines.ToString());
+            }
+            catch (Exception ex)
+            {
+                await message.Channel.SendMessageAsync($"❌ Error: {ex.Message}");
+            }
+        }
+
+        private static readonly ulong[] AuthorizedUsers = ParseUlongListFromEnvironment("MAINBOT_AUTHORIZED_USERS");
+
+        private static readonly ulong[] BotOwners = ParseUlongListFromEnvironment("MAINBOT_OWNERS");
 
         public static bool IsBotOwner(ulong userId)
         {
             return BotOwners.Contains(userId);
         }
 
-        private static readonly Dictionary<string, string> MainBotInvites = new Dictionary<string, string>
-        {
-            { "main1", "EynpFmdN2b" },
-            { "main2", "dusVDzBAd4" },
-            { "testing", "8Pe9u6vbdx" },
-            { "coding", "UPxswDZdXc" },
-            { "tropia", "j9dUbEF54U" },
-            { "friend", "MKywece3uN" }
-        };
+        private static readonly ulong[] AllowedGuilds = ParseUlongListFromEnvironment("MAINBOT_ALLOWED_GUILDS");
 
+        private static readonly bool EnableServerInviteExport = ParseBoolFromEnvironment("MAINBOT_ENABLE_SERVER_INVITES_EXPORT");
+
+        private static readonly Dictionary<string, string> MainBotInvites = ParseInviteMapFromEnvironment("MAINBOT_INVITES");
+
+        private static bool ValidateConfiguration()
+        {
+            bool isValid = true;
+
+            if (BotOwners.Length == 0)
+            {
+                Console.WriteLine("ERROR: MAINBOT_OWNERS is empty. Bot owner security checks cannot work.");
+                isValid = false;
+            }
+
+            if (AllowedGuilds.Length == 0)
+            {
+                Console.WriteLine("ERROR: MAINBOT_ALLOWED_GUILDS is empty. Guild whitelist protection cannot work.");
+                isValid = false;
+            }
+
+            if (AuthorizedUsers.Length == 0)
+            {
+                Console.WriteLine("WARNING: MAINBOT_AUTHORIZED_USERS is empty. Only allowlisted commands and guild admins can use protected commands.");
+            }
+
+            if (MainBotInvites.Count == 0)
+            {
+                Console.WriteLine("WARNING: MAINBOT_INVITES is empty. !invite auto-join helper will do nothing.");
+            }
+
+            return isValid;
+        }
+
+        private static ulong[] ParseUlongListFromEnvironment(string variableName)
+        {
+            var raw = Environment.GetEnvironmentVariable(variableName);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return Array.Empty<ulong>();
+            }
+
+            var values = new List<ulong>();
+            var tokens = raw.Split(new[] { ',', ';', '\n', '\r', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var token in tokens)
+            {
+                if (ulong.TryParse(token.Trim(), out var parsed))
+                {
+                    values.Add(parsed);
+                }
+                else
+                {
+                    Console.WriteLine($"WARNING: Invalid numeric value '{token}' in {variableName}.");
+                }
+            }
+
+            return values.Distinct().ToArray();
+        }
+
+        private static Dictionary<string, string> ParseInviteMapFromEnvironment(string variableName)
+        {
+            var raw = Environment.GetEnvironmentVariable(variableName);
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return result;
+            }
+
+            var entries = raw.Split(new[] { ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            int fallbackIndex = 1;
+
+            foreach (var entry in entries)
+            {
+                var trimmed = entry.Trim();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                var parts = trimmed.Split('=', 2);
+                if (parts.Length == 2)
+                {
+                    var key = parts[0].Trim();
+                    var code = parts[1].Trim();
+                    if (key.Length == 0 || code.Length == 0)
+                    {
+                        Console.WriteLine($"WARNING: Invalid invite entry '{trimmed}' in {variableName}. Use name=code.");
+                        continue;
+                    }
+
+                    result[key] = code;
+                    continue;
+                }
+
+                result[$"invite{fallbackIndex}"] = trimmed;
+                fallbackIndex++;
+            }
+
+            return result;
+        }
+
+        private static bool ParseBoolFromEnvironment(string variableName)
+        {
+            var raw = Environment.GetEnvironmentVariable(variableName);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return false;
+            }
+
+            return string.Equals(raw.Trim(), "true", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(raw.Trim(), "1", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(raw.Trim(), "yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task OnJoinedGuild(SocketGuild guild)
+        {
+            Console.WriteLine($"🎯 Bot was added to server: {guild.Name} (ID: {guild.Id})");
+            
+            bool serverWhitelisted = AllowedGuilds.Contains(guild.Id);
+            
+            Console.WriteLine($"🔍 Server whitelist check: {guild.Name} (ID: {guild.Id}) - Whitelisted: {serverWhitelisted}");
+            
+            if (!serverWhitelisted)
+            {
+                Console.WriteLine($"🚫 Leaving unauthorized server: {guild.Name} (ID: {guild.Id})");
+                
+                try
+                {
+                    var systemChannel = guild.SystemChannel ?? guild.DefaultChannel ?? guild.TextChannels.FirstOrDefault();
+                    if (systemChannel != null)
+                    {
+                        var embed = new EmbedBuilder()
+                            .WithTitle("🚫 Private Bot")
+                            .WithDescription("Dieser Server gehört deiner damaligen Freundin du Hund. Kickst du sie, kickst du mich auch.")
+                            .WithColor(Color.Red)
+                            .WithCurrentTimestamp()
+                            .Build();
+                        
+                        await systemChannel.SendMessageAsync(embed: embed);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Could not send leave message: {ex.Message}");
+                }
+                
+                await Task.Delay(3000);
+                await guild.LeaveAsync();
+            }
+            else
+            {
+                Console.WriteLine($"✅ Staying in authorized server: {guild.Name} (ID: {guild.Id})");
+            }
+        }
+
+        private async Task CheckAndLeaveUnauthorizedServers()
+        {
+            Console.WriteLine("🔍 Checking current servers against whitelist...");
+            
+            foreach (var guild in _client.Guilds.ToList())
+            {
+                bool serverWhitelisted = AllowedGuilds.Contains(guild.Id);
+                
+                if (!serverWhitelisted)
+                {
+                    Console.WriteLine($"🚫 Leaving unauthorized server: {guild.Name} (ID: {guild.Id})");
+                    
+                    try
+                    {
+                        var systemChannel = guild.SystemChannel ?? guild.DefaultChannel ?? guild.TextChannels.FirstOrDefault();
+                        if (systemChannel != null)
+                        {
+                            var embed = new EmbedBuilder()
+                                .WithTitle("🚫 Private Bot - Leaving Server")
+                                .WithDescription("Dieser Server gehört deiner damaligen Freundin du Hund. Kickst du sie, kickst du mich auch.")
+                                .WithColor(Color.Red)
+                                .WithCurrentTimestamp()
+                                .Build();
+                            
+                            await systemChannel.SendMessageAsync(embed: embed);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Could not send leave message to {guild.Name}: {ex.Message}");
+                    }
+                    
+                    await Task.Delay(3000);
+                    await guild.LeaveAsync();
+                    await Task.Delay(1000);
+                }
+                else
+                {
+                    Console.WriteLine($"✅ Staying in authorized server: {guild.Name} (ID: {guild.Id})");
+                }
+            }
+            
+            Console.WriteLine("✅ Server authorization check completed.");
+        }
     }
 }

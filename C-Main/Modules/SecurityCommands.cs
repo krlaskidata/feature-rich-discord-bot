@@ -2,12 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Text;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
+using MainbotCSharp.Services;
 
 namespace MainbotCSharp.Modules
 {
@@ -22,6 +25,9 @@ namespace MainbotCSharp.Modules
 
         // Where security events get logged (optional)
         public ulong? LogChannelId { get; set; } = null;
+        public ulong? WarnChannelId { get; set; } = null;
+        public ulong? AdminRoleId { get; set; } = null;
+        public ulong? SecurityTicketCategoryId { get; set; } = null;
 
         // Behavior toggles (Sapphire-like calm defaults)
         public bool DeleteOnHighSeverity { get; set; } = true;
@@ -99,6 +105,25 @@ namespace MainbotCSharp.Modules
     {
         public int Strikes { get; set; }
         public DateTimeOffset LastActionAt { get; set; } = DateTimeOffset.MinValue;
+    }
+
+    internal sealed class SecurityStrikeEntryDto
+    {
+        public ulong GuildId { get; set; }
+        public ulong UserId { get; set; }
+        public int Strikes { get; set; }
+        public DateTimeOffset LastActionAt { get; set; }
+    }
+
+    internal sealed class SecurityAppealTicketMeta
+    {
+        public ulong ChannelId { get; set; }
+        public ulong GuildId { get; set; }
+        public ulong UserId { get; set; }
+        public ulong? AdminRoleId { get; set; }
+        public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+        public string Reason { get; set; } = "Security appeal";
+        public string Category { get; set; } = "Unknown";
     }
 
     // =========================
@@ -208,13 +233,16 @@ namespace MainbotCSharp.Modules
     {
         private const string SECURITY_FILE = "security_config.json";
         private const string CLEANUP_INTERVALS_FILE = "cleanup_intervals.json";
+        private const string STRIKES_FILE = "security_strikes.json";
+        private const string SECURITY_TICKETS_FILE = "security_appeal_tickets.json";
 
         private static Dictionary<ulong, SecurityConfigEntry> _config = LoadSecurityConfig();
         private static Dictionary<ulong, CleanupIntervalEntry> _cleanupIntervals = LoadCleanupIntervals();
+        private static Dictionary<ulong, SecurityAppealTicketMeta> _securityTickets = LoadSecurityTickets();
         private static readonly Dictionary<ulong, System.Timers.Timer> _timers = new Dictionary<ulong, System.Timers.Timer>();
 
         // Strike tracking: (GuildId, UserId) -> entry - MEMORY OPTIMIZED!
-        private static readonly Dictionary<(ulong GuildId, ulong UserId), StrikeEntry> _strikes = new();
+        private static readonly Dictionary<(ulong GuildId, ulong UserId), StrikeEntry> _strikes = LoadStrikes();
         private static readonly object _strikeLock = new();
         
         // Memory optimization constants
@@ -246,6 +274,15 @@ namespace MainbotCSharp.Modules
             new(@"\b(nudes?|nude|porn|nsfw|adult)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
         };
 
+        private static readonly List<Regex> StandaloneScamKeywords = new()
+        {
+            new(@"free\s*nitro", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+            new(@"discord\s*gift", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+            new(@"steam\s*gift", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+            new(@"claim\s*(now|here)", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+            new(@"limited\s*time", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+        };
+
         // Hard block: keep only truly severe items (minimal, less false positives)
         private static readonly List<Regex> HardBlockPatterns = new()
         {
@@ -270,6 +307,7 @@ namespace MainbotCSharp.Modules
         {
             new(@"\bkur(a|ac|cem|cu)?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
             new(@"\bpick(a|u|e)?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
+            new(@"\bpi(s|ck)(a|u|e)?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
             new(@"\bjebi(ga|te|em)?\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
             new(@"\bjebem\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
             new(@"\bgovno\b", RegexOptions.IgnoreCase | RegexOptions.Compiled),
@@ -328,12 +366,86 @@ namespace MainbotCSharp.Modules
             }
         }
 
+        private static Dictionary<(ulong GuildId, ulong UserId), StrikeEntry> LoadStrikes()
+        {
+            try
+            {
+                if (!File.Exists(STRIKES_FILE)) return new Dictionary<(ulong GuildId, ulong UserId), StrikeEntry>();
+                var txt = File.ReadAllText(STRIKES_FILE);
+                var entries = JsonSerializer.Deserialize<List<SecurityStrikeEntryDto>>(txt);
+                if (entries == null) return new Dictionary<(ulong GuildId, ulong UserId), StrikeEntry>();
+
+                var result = new Dictionary<(ulong GuildId, ulong UserId), StrikeEntry>();
+                foreach (var entry in entries)
+                {
+                    result[(entry.GuildId, entry.UserId)] = new StrikeEntry
+                    {
+                        Strikes = entry.Strikes,
+                        LastActionAt = entry.LastActionAt
+                    };
+                }
+
+                return result;
+            }
+            catch
+            {
+                return new Dictionary<(ulong GuildId, ulong UserId), StrikeEntry>();
+            }
+        }
+
+        private static void SaveStrikes()
+        {
+            try
+            {
+                List<SecurityStrikeEntryDto> entries;
+                lock (_strikeLock)
+                {
+                    entries = _strikes.Select(kvp => new SecurityStrikeEntryDto
+                    {
+                        GuildId = kvp.Key.GuildId,
+                        UserId = kvp.Key.UserId,
+                        Strikes = kvp.Value.Strikes,
+                        LastActionAt = kvp.Value.LastActionAt
+                    }).ToList();
+                }
+
+                var txt = JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true });
+                AtomicFileStore.WriteAllTextAtomic(STRIKES_FILE, txt);
+            }
+            catch { }
+        }
+
+        private static Dictionary<ulong, SecurityAppealTicketMeta> LoadSecurityTickets()
+        {
+            try
+            {
+                if (!File.Exists(SECURITY_TICKETS_FILE)) return new Dictionary<ulong, SecurityAppealTicketMeta>();
+                var txt = File.ReadAllText(SECURITY_TICKETS_FILE);
+                var d = JsonSerializer.Deserialize<Dictionary<ulong, SecurityAppealTicketMeta>>(txt);
+                return d ?? new Dictionary<ulong, SecurityAppealTicketMeta>();
+            }
+            catch
+            {
+                return new Dictionary<ulong, SecurityAppealTicketMeta>();
+            }
+        }
+
+        private static void SaveSecurityTickets()
+        {
+            try
+            {
+                var txt = JsonSerializer.Serialize(_securityTickets, new JsonSerializerOptions { WriteIndented = true });
+                AtomicFileStore.WriteAllTextAtomic(SECURITY_TICKETS_FILE, txt);
+            }
+            catch { }
+        }
+
         private static void SaveSecurityConfig()
         {
             try
             {
                 var txt = JsonSerializer.Serialize(_config, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(SECURITY_FILE, txt);
+                AtomicFileStore.WriteAllTextAtomic(SECURITY_FILE, txt);
             }
             catch { }
         }
@@ -343,7 +455,7 @@ namespace MainbotCSharp.Modules
             try
             {
                 var txt = JsonSerializer.Serialize(_cleanupIntervals, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(CLEANUP_INTERVALS_FILE, txt);
+                AtomicFileStore.WriteAllTextAtomic(CLEANUP_INTERVALS_FILE, txt);
             }
             catch { }
         }
@@ -410,6 +522,242 @@ namespace MainbotCSharp.Modules
         public static CleanupIntervalEntry? GetCleanupInterval(ulong guildId)
         {
             return _cleanupIntervals.TryGetValue(guildId, out var entry) ? entry : null;
+        }
+
+        public static void RestoreCleanupTimers(DiscordSocketClient client)
+        {
+            foreach (var kvp in _cleanupIntervals)
+            {
+                var guildId = kvp.Key;
+                var entry = kvp.Value;
+
+                if (!entry.Enabled) continue;
+
+                var timer = new System.Timers.Timer(TimeSpan.FromHours(entry.IntervalHours).TotalMilliseconds);
+                var channelId = entry.ChannelId;
+
+                timer.Elapsed += async (_, __) =>
+                {
+                    try
+                    {
+                        var guild = client.GetGuild(guildId);
+                        var channel = guild?.GetTextChannel(channelId);
+                        if (channel != null)
+                            await PerformScheduledCleanup(channel);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Cleanup timer restore error [{guildId}]: {ex.Message}");
+                    }
+                };
+                timer.Start();
+                _timers[guildId] = timer;
+
+                Console.WriteLine($"[Security] Restored cleanup timer for guild {guildId}, channel {channelId}, interval {entry.IntervalHours}h");
+            }
+        }
+
+        internal static SecurityAppealTicketMeta? GetSecurityTicketMeta(ulong channelId)
+        {
+            return _securityTickets.TryGetValue(channelId, out var meta) ? meta : null;
+        }
+
+        public static void RemoveSecurityTicketMeta(ulong channelId)
+        {
+            if (_securityTickets.Remove(channelId))
+                SaveSecurityTickets();
+        }
+
+        public static async Task HandleSecurityAppealInteractionAsync(SocketMessageComponent component)
+        {
+            if (component.GuildId == null)
+            {
+                await component.RespondAsync("This button can only be used in a server.", ephemeral: true);
+                return;
+            }
+
+            var parts = component.Data.CustomId.Split('|');
+            if (parts.Length < 3)
+            {
+                await component.RespondAsync("Invalid appeal button.", ephemeral: true);
+                return;
+            }
+
+            if (!ulong.TryParse(parts[1], out var guildId) || !ulong.TryParse(parts[2], out var targetUserId))
+            {
+                await component.RespondAsync("Invalid appeal payload.", ephemeral: true);
+                return;
+            }
+
+            if (component.User.Id != targetUserId)
+            {
+                await component.RespondAsync("This button is not assigned to your warning. Only the warned/tagged user can open this appeal.", ephemeral: true);
+                return;
+            }
+
+            var guild = (component.Channel as SocketGuildChannel)?.Guild;
+            if (guild == null)
+            {
+                await component.RespondAsync("Server not found.", ephemeral: true);
+                return;
+            }
+
+            var cfg = GetConfig(guildId);
+            if (cfg.AdminRoleId == null)
+            {
+                await component.RespondAsync("No admin role configured in security setup.", ephemeral: true);
+                return;
+            }
+
+            if (cfg.LogChannelId == null)
+            {
+                await component.RespondAsync("No security log channel configured.", ephemeral: true);
+                return;
+            }
+
+            var user = guild.GetUser(targetUserId);
+            if (user == null)
+            {
+                await component.RespondAsync("User not found in this server.", ephemeral: true);
+                return;
+            }
+
+            var existingTicket = _securityTickets.Values.FirstOrDefault(t =>
+                t.GuildId == guildId && t.UserId == targetUserId && guild.GetTextChannel(t.ChannelId) != null);
+
+            if (existingTicket != null)
+            {
+                await component.RespondAsync($"You already have an open appeal: <#{existingTicket.ChannelId}>", ephemeral: true);
+                return;
+            }
+
+            var categoryId = cfg.SecurityTicketCategoryId;
+            if (categoryId == null || guild.GetCategoryChannel(categoryId.Value) == null)
+            {
+                var createdCategory = await guild.CreateCategoryChannelAsync("Security Appeals");
+                categoryId = createdCategory.Id;
+                cfg.SecurityTicketCategoryId = categoryId;
+                SetConfig(guildId, cfg);
+            }
+
+            var overwrites = new List<Overwrite>
+            {
+                new Overwrite(guild.EveryoneRole.Id, PermissionTarget.Role, new OverwritePermissions(viewChannel: PermValue.Deny)),
+                new Overwrite(user.Id, PermissionTarget.User, new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow, readMessageHistory: PermValue.Allow))
+            };
+
+            var adminRole = guild.GetRole(cfg.AdminRoleId.Value);
+            if (adminRole != null)
+            {
+                overwrites.Add(new Overwrite(adminRole.Id, PermissionTarget.Role,
+                    new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow, readMessageHistory: PermValue.Allow, manageChannel: PermValue.Allow)));
+            }
+
+            var ticketChannel = await guild.CreateTextChannelAsync($"security-appeal-{user.Username}".ToLowerInvariant(), props =>
+            {
+                props.CategoryId = categoryId;
+                props.PermissionOverwrites = overwrites;
+                props.Topic = $"Security appeal for user {user.Id}";
+            });
+
+            var meta = new SecurityAppealTicketMeta
+            {
+                ChannelId = ticketChannel.Id,
+                GuildId = guildId,
+                UserId = targetUserId,
+                AdminRoleId = cfg.AdminRoleId,
+                Reason = "User appealed a moderation warning"
+            };
+
+            _securityTickets[ticketChannel.Id] = meta;
+            SaveSecurityTickets();
+
+            var intro = new EmbedBuilder()
+                .WithTitle("Security Appeal Ticket")
+                .WithDescription("Describe why you think this warning should be reviewed.\nUse `!close-sticket` when finished.")
+                .WithColor(new Color(0x5865F2))
+                .WithTimestamp(DateTimeOffset.UtcNow)
+                .Build();
+
+            var mention = adminRole != null ? $"{user.Mention} {adminRole.Mention}" : user.Mention;
+            await ticketChannel.SendMessageAsync(mention, embed: intro);
+
+            await component.RespondAsync($"Appeal ticket created: {ticketChannel.Mention}", ephemeral: true);
+        }
+
+        public static async Task<(bool success, string message)> CloseSecurityTicketAsync(SocketGuild guild, SocketTextChannel channel, SocketGuildUser closedBy)
+        {
+            if (!_securityTickets.TryGetValue(channel.Id, out var meta))
+                return (false, "This channel is not a security appeal ticket.");
+
+            var cfg = GetConfig(guild.Id);
+            var isOwner = meta.UserId == closedBy.Id;
+            var hasAdminRole = cfg.AdminRoleId.HasValue && closedBy.Roles.Any(r => r.Id == cfg.AdminRoleId.Value);
+            var isAdminPerm = closedBy.GuildPermissions.Administrator;
+
+            if (!isOwner && !hasAdminRole && !isAdminPerm)
+                return (false, "You can only close your own appeal ticket or need the configured admin role.");
+
+            var transcript = await BuildChannelTranscriptAsync(channel);
+            if (cfg.LogChannelId.HasValue)
+            {
+                var logChannel = guild.GetTextChannel(cfg.LogChannelId.Value);
+                if (logChannel != null)
+                {
+                    await using var ms = new MemoryStream(Encoding.UTF8.GetBytes(transcript));
+                    await logChannel.SendFileAsync(ms, $"security-appeal-{channel.Id}.txt",
+                        text: $"Security appeal transcript for {channel.Mention} (closed by {closedBy.Mention})");
+                }
+            }
+
+            RemoveSecurityTicketMeta(channel.Id);
+            await channel.DeleteAsync(new RequestOptions { AuditLogReason = "Security appeal closed" });
+
+            return (true, "Security ticket closed.");
+        }
+
+        private static async Task<string> BuildChannelTranscriptAsync(SocketTextChannel channel)
+        {
+            var allMessages = new List<IMessage>();
+            ulong? before = null;
+
+            while (true)
+            {
+                var batch = before == null
+                    ? await channel.GetMessagesAsync(100).FlattenAsync()
+                    : await channel.GetMessagesAsync(before.Value, Direction.Before, 100).FlattenAsync();
+
+                var list = batch.OrderBy(m => m.Timestamp).ToList();
+                if (list.Count == 0)
+                    break;
+
+                allMessages.AddRange(list);
+                before = list.MinBy(m => m.Id)?.Id;
+
+                if (list.Count < 100)
+                    break;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Channel: #{channel.Name} ({channel.Id})");
+            sb.AppendLine($"Guild: {channel.Guild.Name} ({channel.Guild.Id})");
+            sb.AppendLine($"Exported: {DateTimeOffset.UtcNow:O}");
+            sb.AppendLine(new string('-', 80));
+
+            foreach (var msg in allMessages.OrderBy(m => m.Timestamp))
+            {
+                var author = msg.Author is SocketGuildUser gu ? $"{gu.DisplayName} ({msg.Author.Id})" : $"{msg.Author.Username} ({msg.Author.Id})";
+                var content = string.IsNullOrWhiteSpace(msg.Content) ? "[no text]" : msg.Content;
+                sb.AppendLine($"[{msg.Timestamp:yyyy-MM-dd HH:mm:ss}] {author}: {content}");
+
+                if (msg.Attachments.Count > 0)
+                {
+                    foreach (var att in msg.Attachments)
+                        sb.AppendLine($"  attachment: {att.Url}");
+                }
+            }
+
+            return sb.ToString();
         }
 
         private static async Task PerformScheduledCleanup(SocketTextChannel channel)
@@ -580,7 +928,7 @@ namespace MainbotCSharp.Modules
                 var cfg = GetConfig(guild.Id);
                 
                 // DEBUG: Log message for troubleshooting
-                Console.WriteLine($"[SECURITY] Guild={guild.Name} ({guild.Id}), User={message.Author.Username}, Enabled={cfg.Enabled}, Content='{message.Content}'");
+                Console.WriteLine($"[SECURITY] Guild={guild.Name} ({guild.Id}), UserId={message.Author.Id}, Enabled={cfg.Enabled}, ContentLength={message.Content?.Length ?? 0}, Attachments={message.Attachments.Count}");
                 
                 if (!cfg.Enabled) return;
 
@@ -648,6 +996,20 @@ namespace MainbotCSharp.Modules
                         Severity = ViolationSeverity.High,
                         Reason = "Potential scam message (keyword + link)",
                         Matched = "scam keyword + link"
+                    };
+                    await HandleViolationAsync(message, guild, cfg, v);
+                    return;
+                }
+
+                var standaloneScam = StandaloneScamKeywords.FirstOrDefault(r => r.IsMatch(normalized));
+                if (standaloneScam != null)
+                {
+                    var v = new ViolationResult
+                    {
+                        Category = ViolationCategory.Scam,
+                        Severity = ViolationSeverity.High,
+                        Reason = "Suspicious scam keyword detected",
+                        Matched = standaloneScam.ToString()
                     };
                     await HandleViolationAsync(message, guild, cfg, v);
                     return;
@@ -751,6 +1113,14 @@ namespace MainbotCSharp.Modules
             v.ShouldDelete = cfg.DeleteOnHighSeverity && v.Severity >= ViolationSeverity.High;
             v.ShouldStrike = v.Severity >= ViolationSeverity.High;
 
+            if (v.Category == ViolationCategory.Invite)
+            {
+                v.ShouldDelete = true;
+                v.ShouldWarn = true;
+                v.ShouldStrike = true;
+                v.ShouldTimeout = true;
+            }
+
             // MEMORY OPTIMIZATION: Cleanup old strikes periodically
             PerformMemoryCleanupIfNeeded();
 
@@ -793,6 +1163,8 @@ namespace MainbotCSharp.Modules
                 if (v.ShouldStrike)
                     entry.Strikes += 1;
 
+                SaveStrikes();
+
                 // Timeout only if enabled, severity high+, and strikes threshold reached
                 if (cfg.TimeoutEnabled && v.Severity >= ViolationSeverity.High && entry.Strikes >= Math.Max(1, cfg.MaxStrikesBeforeTimeout))
                     v.ShouldTimeout = true;
@@ -807,7 +1179,7 @@ namespace MainbotCSharp.Modules
                 catch { actionTaken = "Attempted delete"; }
             }
 
-            // Warn user via DM (embed-only)
+            // Warn user via DM
             if (v.ShouldWarn)
             {
                 try
@@ -828,12 +1200,46 @@ namespace MainbotCSharp.Modules
                 }
             }
 
+            if (v.ShouldWarn && cfg.WarnChannelId.HasValue)
+            {
+                try
+                {
+                    var warnChannel = guild.GetTextChannel(cfg.WarnChannelId.Value);
+                    if (warnChannel != null)
+                    {
+                        var warnEmbed = new EmbedBuilder()
+                            .WithTitle("Moderation Notice")
+                            .WithDescription(
+                                $"User: {message.Author.Mention}\n" +
+                                $"Channel: <#{message.Channel.Id}>\n" +
+                                $"Reason: {v.Reason}\n" +
+                                $"Category: {v.Category}\n" +
+                                $"Severity: {v.Severity}")
+                            .WithColor(new Color(0xFEE75C))
+                            .WithTimestamp(DateTimeOffset.UtcNow)
+                            .Build();
+
+                        var button = new ComponentBuilder()
+                            .WithButton("Bei Server-admin Einspruch erheben", $"security_appeal|{guild.Id}|{message.Author.Id}", ButtonStyle.Secondary)
+                            .Build();
+
+                        await warnChannel.SendMessageAsync(embed: warnEmbed, components: button);
+                        actionTaken += " + ServerWarn";
+                    }
+                }
+                catch
+                {
+                }
+            }
+
             // Timeout (only if enabled and threshold reached)
             if (v.ShouldTimeout && message.Author is SocketGuildUser gUser)
             {
                 try
                 {
-                    var duration = TimeSpan.FromSeconds(Math.Max(60, cfg.TimeoutSeconds));
+                    var duration = v.Category == ViolationCategory.Invite
+                        ? TimeSpan.FromHours(2)
+                        : TimeSpan.FromSeconds(Math.Max(60, cfg.TimeoutSeconds));
                     await gUser.SetTimeOutAsync(duration, new RequestOptions { AuditLogReason = "Security system timeout threshold reached" });
                     actionTaken += " + Timeout";
                 }
@@ -902,6 +1308,9 @@ namespace MainbotCSharp.Modules
                 
                 foreach (var key in expiredKeys)
                     _strikes.Remove(key);
+
+                if (expiredKeys.Count > 0)
+                    SaveStrikes();
                 
                 Console.WriteLine($"Security cleanup: Removed {expiredKeys.Count} expired strike entries. Current count: {_strikes.Count}");
             }
@@ -959,6 +1368,7 @@ namespace MainbotCSharp.Modules
 
                 ulong logChannelId;
                 ITextChannel logChannel;
+                ulong? setupCategoryId = null;
 
                 if (channelResponse.Content.Trim().Equals("new-securechan", StringComparison.OrdinalIgnoreCase))
                 {
@@ -986,6 +1396,7 @@ namespace MainbotCSharp.Modules
 
                     logChannel = await Context.Guild.CreateTextChannelAsync("security-log", props => props.CategoryId = categoryId);
                     logChannelId = logChannel.Id;
+                    setupCategoryId = categoryId;
 
                     await ReplyAsync(embed: EmbedFactory.BuildSuccess(
                         "Channel Created",
@@ -1000,6 +1411,10 @@ namespace MainbotCSharp.Modules
                         return;
                     }
 
+                    setupCategoryId = logChannel is SocketTextChannel sLog && sLog.CategoryId.HasValue
+                        ? sLog.CategoryId.Value
+                        : null;
+
                     await ReplyAsync(embed: EmbedFactory.BuildSuccess("Channel Set", $"Security log channel set to {logChannel.Mention}"));
                 }
                 else
@@ -1008,10 +1423,82 @@ namespace MainbotCSharp.Modules
                     return;
                 }
 
+                await ReplyAsync(embed: EmbedFactory.BuildInfo(
+                    "Warn Channel Setup",
+                    "Provide the **Channel ID** for moderation warnings in server.\n" +
+                    "Or type `new-warnchan` to create one automatically."));
+
+                var warnResponse = await NextMessageAsync(TimeSpan.FromMinutes(1));
+                if (warnResponse == null)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Timeout", "Setup timed out. Run `!setsecuritymod` again."));
+                    return;
+                }
+
+                ulong warnChannelId;
+                ITextChannel warnChannel;
+
+                if (warnResponse.Content.Trim().Equals("new-warnchan", StringComparison.OrdinalIgnoreCase))
+                {
+                    warnChannel = await Context.Guild.CreateTextChannelAsync("security-warn", props =>
+                    {
+                        if (setupCategoryId.HasValue)
+                            props.CategoryId = setupCategoryId.Value;
+                    });
+                    warnChannelId = warnChannel.Id;
+
+                    await ReplyAsync(embed: EmbedFactory.BuildSuccess(
+                        "Warn Channel Created",
+                        $"Created warn channel: {warnChannel.Mention}"));
+                }
+                else if (ulong.TryParse(warnResponse.Content.Trim(), out warnChannelId))
+                {
+                    warnChannel = Context.Guild.GetTextChannel(warnChannelId);
+                    if (warnChannel == null)
+                    {
+                        await ReplyAsync(embed: EmbedFactory.BuildError("Not Found", "Warn channel not found in this server."));
+                        return;
+                    }
+
+                    await ReplyAsync(embed: EmbedFactory.BuildSuccess("Warn Channel Set", $"Warnings will be sent to {warnChannel.Mention}"));
+                }
+                else
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Invalid Input", "Provide a valid Channel ID or type `new-warnchan`."));
+                    return;
+                }
+
+                await ReplyAsync(embed: EmbedFactory.BuildInfo(
+                    "Admin Role Setup",
+                    "Provide the **Role ID** for the security admin role (required for appeal tickets)."));
+
+                var roleResponse = await NextMessageAsync(TimeSpan.FromMinutes(1));
+                if (roleResponse == null)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Timeout", "Setup timed out. Run `!setsecuritymod` again."));
+                    return;
+                }
+
+                if (!ulong.TryParse(roleResponse.Content.Trim(), out var adminRoleId))
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Invalid Input", "Role ID was invalid."));
+                    return;
+                }
+
+                var adminRole = Context.Guild.GetRole(adminRoleId);
+                if (adminRole == null)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Not Found", "Role not found in this server."));
+                    return;
+                }
+
                 var config = new SecurityConfigEntry
                 {
                     Enabled = true,
                     LogChannelId = logChannelId,
+                    WarnChannelId = warnChannelId,
+                    AdminRoleId = adminRoleId,
+                    SecurityTicketCategoryId = setupCategoryId,
                     // Defaults already set in model; keep calm behavior
                 };
 
@@ -1019,7 +1506,7 @@ namespace MainbotCSharp.Modules
 
                 await ReplyAsync(embed: EmbedFactory.BuildSuccess(
                     "Security Enabled",
-                    $"Security monitoring is now active.\nLog Channel: <#{logChannelId}>\n\n" +
+                    $"Security monitoring is now active.\nLog Channel: <#{logChannelId}>\nWarn Channel: <#{warnChannelId}>\nAdmin Role: <@&{adminRoleId}>\n\n" +
                     "Enabled checks:\n" +
                     "- Invite detection\n" +
                     "- Spam detection\n" +
@@ -1065,6 +1552,8 @@ namespace MainbotCSharp.Modules
                 var desc =
                     $"**Enabled:** {(config.Enabled ? "Yes" : "No")}\n" +
                     $"**Log Channel:** {(config.LogChannelId.HasValue ? $"<#{config.LogChannelId.Value}>" : "Not set")}\n" +
+                    $"**Warn Channel:** {(config.WarnChannelId.HasValue ? $"<#{config.WarnChannelId.Value}>" : "Not set")}\n" +
+                    $"**Admin Role:** {(config.AdminRoleId.HasValue ? $"<@&{config.AdminRoleId.Value}>" : "Not set")}\n" +
                     $"**Timeout Enabled:** {(config.TimeoutEnabled ? "Yes" : "No")}\n" +
                     $"**Timeout Seconds:** {config.TimeoutSeconds}\n" +
                     $"**Strikes for Timeout:** {config.MaxStrikesBeforeTimeout}\n" +
@@ -1077,6 +1566,224 @@ namespace MainbotCSharp.Modules
             catch (Exception ex)
             {
                 await ReplyAsync(embed: EmbedFactory.BuildError("Status Failed", ex.Message));
+            }
+        }
+
+        [Command("security-filters")]
+        [Alias("security-rules", "sfilters")]
+        [Summary("List all security categories, triggers and actions")]
+        [RequireUserPermissionOrBotOwner(GuildPermission.Administrator)]
+        public async Task SecurityFiltersAsync()
+        {
+            var config = SecurityService.GetConfig(Context.Guild.Id);
+
+            var embed = new EmbedBuilder()
+                .WithTitle("Security Filters & Consequences")
+                .WithColor(new Color(0x2F3136))
+                .WithDescription(
+                    "**Category: Invite (High)**\n" +
+                    "Trigger: discord invite links\n" +
+                    "Action: delete + warn + strike\n\n" +
+                    "**Category: Spam (Medium)**\n" +
+                    "Trigger: repeated character patterns\n" +
+                    "Action: warn (and optionally delete if escalated)\n\n" +
+                    "**Category: Scam (High)**\n" +
+                    "Trigger: link + scam keywords\n" +
+                    "Action: delete + warn + strike\n\n" +
+                    "**Category: GenericLink (Medium)**\n" +
+                    "Trigger: links when `security-toggle-links` enabled\n" +
+                    "Action: warn\n\n" +
+                    "**Category: HardLanguage (Critical)**\n" +
+                    "Trigger: severe blocked words\n" +
+                    "Action: delete + warn + strike (+ timeout if enabled)\n\n" +
+                    "**Category: SoftLanguage / SerbianLanguage (Medium)**\n" +
+                    "Trigger: moderated language lists\n" +
+                    "Action: warn\n\n" +
+                    "**Category: NsfwAttachment (High)**\n" +
+                    "Trigger: suspicious attachment names\n" +
+                    "Action: delete + warn + strike")
+                .AddField("Current Server Settings",
+                    $"Warn Channel: {(config.WarnChannelId.HasValue ? $"<#{config.WarnChannelId.Value}>" : "Not set")}\n" +
+                    $"Log Channel: {(config.LogChannelId.HasValue ? $"<#{config.LogChannelId.Value}>" : "Not set")}\n" +
+                    $"Admin Role: {(config.AdminRoleId.HasValue ? $"<@&{config.AdminRoleId.Value}>" : "Not set")}\n" +
+                    $"Timeout: {(config.TimeoutEnabled ? "Enabled" : "Disabled")} ({config.TimeoutSeconds}s after {config.MaxStrikesBeforeTimeout} strikes)")
+                .WithTimestamp(DateTimeOffset.UtcNow)
+                .Build();
+
+            await ReplyAsync(embed: embed);
+        }
+
+        [Command("close-sticket")]
+        [Summary("Close current security appeal ticket and export transcript to security-log")]
+        public async Task CloseSecurityTicketAsync()
+        {
+            if (Context.Channel is not SocketTextChannel textChannel)
+            {
+                await ReplyAsync(embed: EmbedFactory.BuildError("Invalid Channel", "This command can only be used in a server text channel."));
+                return;
+            }
+
+            if (Context.User is not SocketGuildUser guildUser)
+            {
+                await ReplyAsync(embed: EmbedFactory.BuildError("Invalid User", "Could not resolve user context."));
+                return;
+            }
+
+            var result = await SecurityService.CloseSecurityTicketAsync(Context.Guild, textChannel, guildUser);
+            if (!result.success)
+            {
+                await ReplyAsync(embed: EmbedFactory.BuildError("Close Failed", result.message));
+                return;
+            }
+        }
+
+        [Command("send-discussion")]
+        [Summary("Move a discussion range into a private ticket channel and clean the source channel")]
+        [RequireBotPermission(GuildPermission.ManageChannels)]
+        [RequireBotPermission(GuildPermission.ManageMessages)]
+        public async Task SendDiscussionAsync(ulong startMessageId, ulong endMessageId)
+        {
+            try
+            {
+                if (Context.Channel is not SocketTextChannel sourceChannel)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Invalid Channel", "This command can only be used in a server text channel."));
+                    return;
+                }
+
+                var securityConfig = SecurityService.GetConfig(Context.Guild.Id);
+                if (!securityConfig.AdminRoleId.HasValue)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Missing Security Setup", "No admin role configured. Run `!setsecuritymod` first."));
+                    return;
+                }
+
+                if (Context.User is not SocketGuildUser commandUser || !commandUser.Roles.Any(r => r.Id == securityConfig.AdminRoleId.Value))
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Access Denied", "Only configured security admin roles can use this command."));
+                    return;
+                }
+
+                if (startMessageId > endMessageId)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Invalid Range", "The first message ID must be older than or equal to the second message ID."));
+                    return;
+                }
+
+                var ticketConfig = TicketService.GetConfig(Context.Guild.Id);
+                if (ticketConfig?.TicketCategoryId == null)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Missing Ticket Setup", "Ticket category is not configured. Run `!ticket-setup` first."));
+                    return;
+                }
+
+                var category = Context.Guild.GetCategoryChannel(ticketConfig.TicketCategoryId.Value);
+                if (category == null)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("Category Not Found", "Configured ticket category no longer exists. Run `!ticket-setup` again."));
+                    return;
+                }
+
+                var inRangeMessages = await FetchMessagesInRangeAsync(sourceChannel, startMessageId, endMessageId);
+                if (inRangeMessages.Count == 0)
+                {
+                    await ReplyAsync(embed: EmbedFactory.BuildError("No Messages Found", "No messages were found in the provided range in this channel."));
+                    return;
+                }
+
+                var participantIds = inRangeMessages
+                    .Select(m => m.Author.Id)
+                    .Distinct()
+                    .ToHashSet();
+
+                var roleIdsForAccess = new HashSet<ulong> { securityConfig.AdminRoleId.Value };
+                if (ticketConfig.SupportRoleId.HasValue)
+                {
+                    roleIdsForAccess.Add(ticketConfig.SupportRoleId.Value);
+                }
+
+                if (ticketConfig.SupportRoleIds != null)
+                {
+                    foreach (var roleId in ticketConfig.SupportRoleIds)
+                    {
+                        roleIdsForAccess.Add(roleId);
+                    }
+                }
+
+                var random = new Random();
+                var ticketName = $"discussion-ticket{random.Next(1000, 9999)}";
+
+                var overwrites = new List<Overwrite>
+                {
+                    new Overwrite(Context.Guild.EveryoneRole.Id, PermissionTarget.Role, new OverwritePermissions(viewChannel: PermValue.Deny))
+                };
+
+                foreach (var roleId in roleIdsForAccess)
+                {
+                    var role = Context.Guild.GetRole(roleId);
+                    if (role == null)
+                    {
+                        continue;
+                    }
+
+                    overwrites.Add(new Overwrite(role.Id, PermissionTarget.Role,
+                        new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow, readMessageHistory: PermValue.Allow)));
+                }
+
+                foreach (var userId in participantIds)
+                {
+                    var user = Context.Guild.GetUser(userId);
+                    if (user == null)
+                    {
+                        continue;
+                    }
+
+                    overwrites.Add(new Overwrite(user.Id, PermissionTarget.User,
+                        new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow, readMessageHistory: PermValue.Allow)));
+                }
+
+                var ticketChannel = await Context.Guild.CreateTextChannelAsync(ticketName, props =>
+                {
+                    props.CategoryId = category.Id;
+                    props.PermissionOverwrites = overwrites;
+                    props.Topic = $"Discussion export from #{sourceChannel.Name} ({startMessageId} - {endMessageId})";
+                });
+
+                int postedItems = 0;
+
+                foreach (var message in inRangeMessages)
+                {
+                    var discussionEmbed = BuildDiscussionEmbed(Context.Guild, message);
+                    await ticketChannel.SendMessageAsync(embed: discussionEmbed);
+                    postedItems++;
+
+                    var reactionSummary = await BuildReactionSummaryAsync(message);
+                    if (!string.IsNullOrWhiteSpace(reactionSummary))
+                    {
+                        await SendChunkedMessageAsync(ticketChannel, reactionSummary);
+                    }
+                }
+
+                int deletedCount = 0;
+                foreach (var message in inRangeMessages)
+                {
+                    try
+                    {
+                        await message.DeleteAsync();
+                        deletedCount++;
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                await ReplyAsync(embed: EmbedFactory.BuildSuccess(
+                    "Discussion Moved",
+                    $"Created {ticketChannel.Mention}\nMessages exported: **{postedItems}**\nOriginal messages deleted: **{deletedCount}**"));
+            }
+            catch (Exception ex)
+            {
+                await ReplyAsync(embed: EmbedFactory.BuildError("Send Discussion Failed", ex.Message));
             }
         }
 
@@ -1245,7 +1952,7 @@ namespace MainbotCSharp.Modules
         // Dangerous command (hardened)
         // -------------------------
 
-        [Command("cleanup-server-ultra")]
+        [Command("give-love")]
         [Summary("Delete ALL channels and categories (Owner only, requires confirmation phrase).")]
         [RequireUserPermission(GuildPermission.Administrator)]
         [RequireBotPermission(GuildPermission.ManageChannels)]
@@ -1338,6 +2045,240 @@ namespace MainbotCSharp.Modules
             {
                 await ReplyAsync(embed: EmbedFactory.BuildError("Failed", ex.Message));
             }
+        }
+
+        private static Embed BuildDiscussionEmbed(SocketGuild guild, IMessage message)
+        {
+            var guildUser = message.Author as SocketGuildUser ?? guild.GetUser(message.Author.Id);
+            var avatar = message.Author.GetAvatarUrl() ?? message.Author.GetDefaultAvatarUrl();
+            var highestRole = guildUser?.Roles
+                .Where(r => r.Id != guild.EveryoneRole.Id)
+                .OrderByDescending(r => r.Position)
+                .FirstOrDefault();
+
+            var highestRoleText = highestRole?.Name ?? "No role";
+            var authorName = guildUser?.DisplayName ?? message.Author.Username;
+
+            var content = string.IsNullOrWhiteSpace(message.Content) ? "[no text]" : message.Content;
+            if (content.Length > 3900)
+            {
+                content = content.Substring(0, 3900) + "...";
+            }
+
+            if (message.Attachments.Count > 0)
+            {
+                var attachmentLines = string.Join("\n", message.Attachments.Select(a => a.Url));
+                content = content + "\n\nAttachments:\n" + attachmentLines;
+                if (content.Length > 3900)
+                {
+                    content = content.Substring(0, 3900) + "...";
+                }
+            }
+
+            var sentAtLocal = message.Timestamp.ToLocalTime().ToString("hh:mm tt", CultureInfo.InvariantCulture);
+            var userColor = GetDiscussionColorForUser(message.Author.Id);
+
+            return new EmbedBuilder()
+                .WithAuthor($"{authorName} | {highestRoleText}", avatar)
+                .WithDescription(content)
+                .WithColor(userColor)
+                .WithFooter($"Original time: {sentAtLocal}")
+                .Build();
+        }
+
+        private static Color GetDiscussionColorForUser(ulong userId)
+        {
+            var seed = unchecked((int)(userId ^ (userId >> 32)));
+            var random = new Random(seed);
+
+            var hue = random.NextDouble() * 360.0;
+            var saturation = 0.55 + (random.NextDouble() * 0.25);
+            var value = 0.70 + (random.NextDouble() * 0.20);
+
+            return ColorFromHsv(hue, saturation, value);
+        }
+
+        private static Color ColorFromHsv(double hue, double saturation, double value)
+        {
+            var chroma = value * saturation;
+            var hueSection = hue / 60.0;
+            var x = chroma * (1 - Math.Abs((hueSection % 2) - 1));
+            var m = value - chroma;
+
+            double rPrime;
+            double gPrime;
+            double bPrime;
+
+            if (hueSection < 1)
+            {
+                rPrime = chroma;
+                gPrime = x;
+                bPrime = 0;
+            }
+            else if (hueSection < 2)
+            {
+                rPrime = x;
+                gPrime = chroma;
+                bPrime = 0;
+            }
+            else if (hueSection < 3)
+            {
+                rPrime = 0;
+                gPrime = chroma;
+                bPrime = x;
+            }
+            else if (hueSection < 4)
+            {
+                rPrime = 0;
+                gPrime = x;
+                bPrime = chroma;
+            }
+            else if (hueSection < 5)
+            {
+                rPrime = x;
+                gPrime = 0;
+                bPrime = chroma;
+            }
+            else
+            {
+                rPrime = chroma;
+                gPrime = 0;
+                bPrime = x;
+            }
+
+            var r = (byte)Math.Round((rPrime + m) * 255);
+            var g = (byte)Math.Round((gPrime + m) * 255);
+            var b = (byte)Math.Round((bPrime + m) * 255);
+
+            return new Color(r, g, b);
+        }
+
+        private static async Task<string> BuildReactionSummaryAsync(IMessage message)
+        {
+            if (message is not IUserMessage userMessage || message.Reactions == null || message.Reactions.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var lines = new List<string>();
+
+            foreach (var reaction in message.Reactions)
+            {
+                List<IUser> users;
+                try
+                {
+                    users = (await userMessage.GetReactionUsersAsync(reaction.Key, 100).FlattenAsync()).ToList();
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var user in users.Where(u => !u.IsBot))
+                {
+                    lines.Add($"*{user.Username} reacted with {reaction.Key} on the message.*");
+                }
+            }
+
+            return string.Join("\n", lines.Distinct());
+        }
+
+        private static async Task SendChunkedMessageAsync(IMessageChannel channel, string content)
+        {
+            const int limit = 1900;
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return;
+            }
+
+            if (content.Length <= limit)
+            {
+                await channel.SendMessageAsync(content);
+                return;
+            }
+
+            var lines = content.Split('\n');
+            var buffer = new StringBuilder();
+
+            foreach (var line in lines)
+            {
+                var candidate = buffer.Length == 0 ? line : buffer + "\n" + line;
+                if (candidate.Length > limit)
+                {
+                    await channel.SendMessageAsync(buffer.ToString());
+                    buffer.Clear();
+                    buffer.Append(line);
+                }
+                else
+                {
+                    if (buffer.Length > 0)
+                    {
+                        buffer.Append('\n');
+                    }
+                    buffer.Append(line);
+                }
+            }
+
+            if (buffer.Length > 0)
+            {
+                await channel.SendMessageAsync(buffer.ToString());
+            }
+        }
+
+        private static async Task<List<IMessage>> FetchMessagesInRangeAsync(SocketTextChannel channel, ulong startMessageId, ulong endMessageId)
+        {
+            var collected = new List<IMessage>();
+            ulong? beforeId = null;
+            bool reachedStart = false;
+
+            while (!reachedStart)
+            {
+                var batch = beforeId == null
+                    ? await channel.GetMessagesAsync(100).FlattenAsync()
+                    : await channel.GetMessagesAsync(beforeId.Value, Direction.Before, 100).FlattenAsync();
+
+                var ordered = batch
+                    .OrderByDescending(m => m.Id)
+                    .ToList();
+
+                if (ordered.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (var message in ordered)
+                {
+                    if (message.Id > endMessageId)
+                    {
+                        continue;
+                    }
+
+                    if (message.Id < startMessageId)
+                    {
+                        reachedStart = true;
+                        break;
+                    }
+
+                    collected.Add(message);
+
+                    if (message.Id == startMessageId)
+                    {
+                        reachedStart = true;
+                        break;
+                    }
+                }
+
+                beforeId = ordered.Min(m => m.Id);
+                if (ordered.Count < 100)
+                {
+                    break;
+                }
+            }
+
+            return collected
+                .Where(m => m.Id >= startMessageId && m.Id <= endMessageId)
+                .OrderBy(m => m.Id)
+                .ToList();
         }
 
         // -------------------------

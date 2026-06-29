@@ -8,32 +8,41 @@ namespace MainbotCSharp
 {
     public class Program
     {
-        public static async Task Main(string[] args)
+        public static async Task<int> Main(string[] args)
         {
-            var envFile = Path.Combine(Directory.GetCurrentDirectory(), ".env");
-            if (File.Exists(envFile))
+            try
             {
-                LoadEnvironmentFromFile(envFile);
-                Console.WriteLine("✅ Environment variables loaded from .env file");
-            }
-            else
-            {
-                Console.WriteLine("⚠️  No .env file found, using system environment variables");
-            }
-
-            var builder = Host.CreateDefaultBuilder(args)
-                .ConfigureServices((hostContext, services) =>
+                var envFile = Path.Combine(Directory.GetCurrentDirectory(), ".env");
+                if (File.Exists(envFile))
                 {
-                    services.AddSingleton<Bot>();
-                })
-                .UseConsoleLifetime();
+                    LoadEnvironmentFromFile(envFile);
+                    Console.WriteLine("✅ Environment variables loaded from .env file");
+                }
+                else
+                {
+                    Console.WriteLine("⚠️  No .env file found, using system environment variables");
+                }
 
-            var host = builder.Build();
+                var builder = Host.CreateDefaultBuilder(args)
+                    .ConfigureServices((hostContext, services) =>
+                    {
+                        services.AddSingleton<Bot>();
+                    })
+                    .UseConsoleLifetime();
 
-            var bot = host.Services.GetRequiredService<Bot>();
-            await bot.InitializeAsync();
+                var host = builder.Build();
 
-            await host.RunAsync();
+                var bot = host.Services.GetRequiredService<Bot>();
+                await bot.InitializeAsync();
+
+                await host.RunAsync();
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FATAL: Startup failed: {ex.Message}");
+                return 1;
+            }
         }
 
         private static void LoadEnvironmentFromFile(string filePath)

@@ -190,9 +190,7 @@ namespace MainbotCSharp.Modules
         [Summary("Show complete command overview")]
         public async Task HelpAllAsync()
         {
-            // This just redirects to the main help command
-            var mainCommands = new MainCommands();
-            await mainCommands.HelpAsync();
+            await ReplyAsync("Use `!help` to open the complete command overview.");
         }
     }
 }

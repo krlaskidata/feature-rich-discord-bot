@@ -24,7 +24,7 @@ namespace MainbotCSharp.Services
         private const ulong DISBOARD_BOT_ID = 302050872383242240;
         private static Dictionary<ulong, BumpReminderData> _bumpReminders = LoadBumpReminders();
         private static readonly Dictionary<ulong, System.Threading.Timer> _activeTimers = new Dictionary<ulong, System.Threading.Timer>();
-        private static DiscordSocketClient _client;
+        private static DiscordSocketClient? _client;
 
         // MEMORY OPTIMIZED: Essential bump keywords only
         private static readonly string[] BumpKeywords = new[]
@@ -257,7 +257,7 @@ namespace MainbotCSharp.Services
             }
         }
 
-        public static BumpReminderData GetBumpReminderStatus(ulong guildId)
+        public static BumpReminderData? GetBumpReminderStatus(ulong guildId)
         {
             return _bumpReminders.TryGetValue(guildId, out var data) ? data : null;
         }

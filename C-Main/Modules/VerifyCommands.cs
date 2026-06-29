@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,6 +7,7 @@ using System.Threading.Tasks;
 using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
+using MainbotCSharp.Services;
 
 namespace MainbotCSharp.Modules
 {
@@ -18,30 +18,14 @@ namespace MainbotCSharp.Modules
         public ulong RoleId { get; set; }
         public ulong? MessageId { get; set; }
         public ulong? LogChannelId { get; set; }
-        public bool RequireCaptcha { get; set; } = false;
         public Dictionary<ulong, bool?> Snapshot { get; set; } = new Dictionary<ulong, bool?>();
         public Dictionary<ulong, DateTime> PendingVerifications { get; set; } = new Dictionary<ulong, DateTime>();
-    }
-
-    public class VerifyAttempt
-    {
-        public ulong UserId { get; set; }
-        public string? CaptchaCode { get; set; }
-        public DateTime CreatedAt { get; set; }
-        public int AttemptCount { get; set; } = 0;
     }
 
     public static class VerifyService
     {
         private const string VERIFY_FILE = "main_verify_config.json";
         private static Dictionary<ulong, VerifyConfigEntry> _cfg = LoadVerifyConfig();
-        private static ConcurrentDictionary<ulong, VerifyAttempt> _pendingCaptchas = new();
-        private static readonly Random _random = new Random();
-        
-        // MEMORY OPTIMIZATION: Cleanup expired captchas
-        private static DateTime _lastCleanup = DateTime.UtcNow;
-        private const int MAX_PENDING_CAPTCHAS = 100; // Reduced from 1000 to 100 for memory optimization
-        private const int CAPTCHA_EXPIRY_MINUTES = 30; // Expire after 30 minutes
 
         private static Dictionary<ulong, VerifyConfigEntry> LoadVerifyConfig()
         {
@@ -63,7 +47,7 @@ namespace MainbotCSharp.Modules
             try
             {
                 var txt = JsonSerializer.Serialize(_cfg, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(VERIFY_FILE, txt);
+                AtomicFileStore.WriteAllTextAtomic(VERIFY_FILE, txt);
             }
             catch { }
         }
@@ -81,13 +65,6 @@ namespace MainbotCSharp.Modules
         public static void RemoveConfig(ulong guildId)
         {
             if (_cfg.ContainsKey(guildId)) { _cfg.Remove(guildId); SaveVerifyConfig(); }
-        }
-
-        public static string GenerateCaptcha()
-        {
-            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            return new string(Enumerable.Repeat(chars, 6)
-                .Select(s => s[_random.Next(s.Length)]).ToArray());
         }
 
         public static async Task HandleVerifyButtonAsync(SocketMessageComponent component)
@@ -139,103 +116,12 @@ namespace MainbotCSharp.Modules
                     return;
                 }
 
-                if (config.RequireCaptcha)
-                {
-                    await HandleCaptchaVerification(component, config);
-                    return;
-                }
-
                 await VerifyUser(component, config);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Verify button error: {ex.Message}");
                 await component.RespondAsync("❌ Verification failed. Please try again.", ephemeral: true);
-            }
-        }
-
-        private static async Task HandleCaptchaVerification(SocketMessageComponent component, VerifyConfigEntry config)
-        {
-            // MEMORY OPTIMIZATION: Cleanup expired captchas before creating new ones
-            CleanupExpiredCaptchas();
-            
-            var captchaCode = GenerateCaptcha();
-            _pendingCaptchas[component.User.Id] = new VerifyAttempt
-            {
-                UserId = component.User.Id,
-                CaptchaCode = captchaCode,
-                CreatedAt = DateTime.UtcNow,
-                AttemptCount = 0
-            };
-
-            var embed = new EmbedBuilder()
-                .WithTitle("🔐 Verification Required")
-                .WithDescription($"Please solve this captcha to verify:\n\n**Enter this code:** `{captchaCode}`\n\nReply with just the code in this channel.")
-                .WithColor(Color.Orange)
-                .WithFooter("Expires in 5 minutes");
-
-            await component.RespondAsync(embed: embed.Build(), ephemeral: true);
-
-            _ = Task.Delay(TimeSpan.FromMinutes(5)).ContinueWith(_ =>
-            {
-                _pendingCaptchas.TryRemove(component.User.Id, out var _);
-            });
-        }
-
-        public static async Task HandleCaptchaResponse(SocketMessage message)
-        {
-            try
-            {
-                if (message.Author.IsBot) return;
-                if (!_pendingCaptchas.TryGetValue(message.Author.Id, out var attempt)) return;
-
-                var guild = (message.Channel as SocketTextChannel)?.Guild;
-                if (guild == null) return;
-
-                var config = GetConfig(guild.Id);
-                if (config == null) return;
-
-                attempt.AttemptCount++;
-
-                if (message.Content.Trim().ToUpper() == attempt.CaptchaCode)
-                {
-                    _pendingCaptchas.TryRemove(message.Author.Id, out _);
-
-                    var role = guild.GetRole(config.RoleId);
-                    var user = guild.GetUser(message.Author.Id);
-
-                    if (role != null && user != null)
-                    {
-                        await user.AddRoleAsync(role);
-                        config.Snapshot[user.Id] = true;
-                        SaveVerifyConfig();
-
-                        if (message is IUserMessage userMessage)
-                            await userMessage.ReplyAsync($"✅ **Verification successful!** You now have access to {guild.Name}!");
-                        await LogVerificationAttempt(guild, user, "Captcha verification", true);
-                    }
-                }
-                else
-                {
-                    if (attempt.AttemptCount >= 3)
-                    {
-                        _pendingCaptchas.TryRemove(message.Author.Id, out _);
-                        if (message is IUserMessage userMessage2)
-                            await userMessage2.ReplyAsync("❌ **Too many failed attempts.** Please try the verification process again.");
-                        await LogVerificationAttempt(guild, message.Author, "Failed captcha (3 attempts)", false);
-                    }
-                    else
-                    {
-                        if (message is IUserMessage userMessage3)
-                            await userMessage3.ReplyAsync($"❌ **Incorrect code.** Try again. ({attempt.AttemptCount}/3 attempts)");
-                    }
-                }
-
-                try { await message.DeleteAsync(); } catch { }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Captcha response error: {ex.Message}");
             }
         }
 
@@ -344,47 +230,6 @@ namespace MainbotCSharp.Modules
             }
         }
         
-        // MEMORY OPTIMIZATION: Cleanup expired captchas
-        private static void CleanupExpiredCaptchas()
-        {
-            try
-            {
-                // Only run cleanup once every 10 minutes
-                if (DateTime.UtcNow - _lastCleanup < TimeSpan.FromMinutes(10))
-                    return;
-                
-                _lastCleanup = DateTime.UtcNow;
-                
-                var expiredTime = DateTime.UtcNow.AddMinutes(-CAPTCHA_EXPIRY_MINUTES);
-                var expiredUsers = _pendingCaptchas
-                    .Where(kvp => kvp.Value.CreatedAt < expiredTime)
-                    .Select(kvp => kvp.Key)
-                    .ToList();
-                
-                foreach (var userId in expiredUsers)
-                    _pendingCaptchas.TryRemove(userId, out _);
-                
-                // If still too many entries, remove oldest ones
-                if (_pendingCaptchas.Count > MAX_PENDING_CAPTCHAS)
-                {
-                    var oldestEntries = _pendingCaptchas
-                        .OrderBy(kvp => kvp.Value.CreatedAt)
-                        .Take(_pendingCaptchas.Count - MAX_PENDING_CAPTCHAS)
-                        .Select(kvp => kvp.Key)
-                        .ToList();
-                    
-                    foreach (var userId in oldestEntries)
-                        _pendingCaptchas.TryRemove(userId, out _);
-                }
-                
-                if (expiredUsers.Count > 0)
-                    Console.WriteLine($"Verify cleanup: Removed {expiredUsers.Count} expired captchas. Active: {_pendingCaptchas.Count}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error during captcha cleanup: {ex.Message}");
-            }
-        }
     }
 
     public class VerifyCommands : ModuleBase<SocketCommandContext>
@@ -392,7 +237,7 @@ namespace MainbotCSharp.Modules
         [Command("verify-setup")]
         [Summary("Setup verification system (Admin only)")]
         [RequireUserPermissionOrBotOwner(GuildPermission.Administrator)]
-        public async Task SetupVerifyAsync(IRole role, ITextChannel? logChannel = null, bool requireCaptcha = false)
+        public async Task SetupVerifyAsync(IRole role, ITextChannel? logChannel = null)
         {
             try
             {
@@ -402,7 +247,6 @@ namespace MainbotCSharp.Modules
                                    "To access all channels and features, please verify yourself by clicking the button below.\n\n" +
                                    "**Verification Requirements:**\n" +
                                    "• Your Discord account must be at least 7 days old\n" +
-                                   (requireCaptcha ? "• Complete a simple captcha\n" : "") +
                                    "• Click the verification button\n\n" +
                                    "If you have any issues, contact a staff member.")
                     .WithColor(0x40E0D0)
@@ -419,8 +263,7 @@ namespace MainbotCSharp.Modules
                     ChannelId = Context.Channel.Id,
                     RoleId = role.Id,
                     MessageId = message.Id,
-                    LogChannelId = logChannel?.Id,
-                    RequireCaptcha = requireCaptcha
+                    LogChannelId = logChannel?.Id
                 };
 
                 VerifyService.SetConfig(Context.Guild.Id, config);
@@ -430,7 +273,6 @@ namespace MainbotCSharp.Modules
                     .WithColor(Color.Green)
                     .AddField("Verified Role", role.Mention, true)
                     .AddField("Log Channel", logChannel?.Mention ?? "None", true)
-                    .AddField("Captcha Required", requireCaptcha ? "Yes" : "No", true)
                     .AddField("Anti-bot Protection", "7+ day account age", false)
                     .WithDescription("Users can now verify using the button above!");
 
@@ -481,7 +323,7 @@ namespace MainbotCSharp.Modules
                     await ReplyAsync("❌ Failed to verify user.");
                 }
             }
-            catch (Exception ex)
+            catch
             {
                 var errorEmbed = new EmbedBuilder()
                     .WithTitle("❌ Failed to Verify")
@@ -531,7 +373,7 @@ namespace MainbotCSharp.Modules
                     await ReplyAsync("❌ Failed to unverify user.");
                 }
             }
-            catch (Exception ex)
+            catch
             {
                 var errorEmbed = new EmbedBuilder()
                     .WithTitle("❌ Failed to Unverify")
@@ -570,8 +412,7 @@ namespace MainbotCSharp.Modules
                     .AddField("Configuration",
                         $"**Channel:** {channel?.Mention ?? "Not found"}\n" +
                         $"**Role:** {role?.Mention ?? "Not found"}\n" +
-                        $"**Log Channel:** {logChannel?.Mention ?? "None"}\n" +
-                        $"**Captcha:** {(config.RequireCaptcha ? "Enabled" : "Disabled")}", false)
+                        $"**Log Channel:** {logChannel?.Mention ?? "None"}", false)
                     .AddField("Statistics",
                         $"**Verified Users:** {verifiedCount:N0}\n" +
                         $"**Total Members:** {totalMembers:N0}\n" +
@@ -579,7 +420,7 @@ namespace MainbotCSharp.Modules
                     .AddField("Security",
                         "**Account Age:** 7+ days required\n" +
                         "**Anti-bot:** Enabled\n" +
-                        "**Method:** Button + Captcha", true)
+                        "**Method:** Verify button", true)
                     .WithTimestamp(DateTimeOffset.UtcNow);
 
                 if (config.MessageId.HasValue)

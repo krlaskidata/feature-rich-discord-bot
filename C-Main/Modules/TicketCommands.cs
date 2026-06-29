@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
+using MainbotCSharp.Services;
 
 namespace MainbotCSharp.Modules
 {
@@ -55,7 +56,7 @@ namespace MainbotCSharp.Modules
             try
             {
                 var txt = JsonSerializer.Serialize(_cfg, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(TICKETS_CONFIG_FILE, txt);
+                AtomicFileStore.WriteAllTextAtomic(TICKETS_CONFIG_FILE, txt);
             }
             catch { }
         }
@@ -1112,7 +1113,7 @@ namespace MainbotCSharp.Modules
 
             Task Handler(SocketMessage message)
             {
-                Console.WriteLine($"[NextMessageAsync-TICKET] Handler triggered: Author={message.Author.Id}, Channel={message.Channel.Id}, Content='{message.Content}'");
+                Console.WriteLine($"[NextMessageAsync-TICKET] Handler triggered: Author={message.Author.Id}, Channel={message.Channel.Id}, ContentLength={message.Content?.Length ?? 0}, Attachments={message.Attachments.Count}");
                 Console.WriteLine($"[NextMessageAsync-TICKET] Expecting: Author={expectedUserId}, Channel={expectedChannelId}");
                 
                 if (message.Channel.Id == expectedChannelId && message.Author.Id == expectedUserId && !message.Author.IsBot)
@@ -1383,6 +1384,29 @@ namespace MainbotCSharp.Modules
                         .WithColor(0x40E0D0)
                         .Build();
                     await ReplyAsync(embed: notTicketEmbed);
+                    return;
+                }
+
+                var user = Context.User as SocketGuildUser;
+                var config = TicketService.GetConfig(Context.Guild.Id);
+                var roleIds = config?.SupportRoleIds?.Any() == true
+                    ? config.SupportRoleIds
+                    : (config?.SupportRoleId.HasValue == true
+                        ? new List<ulong> { config.SupportRoleId.Value }
+                        : new List<ulong>());
+
+                var hasSupportRole = user != null && roleIds.Any(roleId => user.Roles.Any(role => role.Id == roleId));
+                var isBotOwner = Bot.IsBotOwner(Context.User.Id);
+                var isAdmin = user?.GuildPermissions.Administrator == true;
+
+                if (!isBotOwner && !isAdmin && !hasSupportRole)
+                {
+                    var noPermissionEmbed = new EmbedBuilder()
+                        .WithTitle("❌ No Permission")
+                        .WithDescription("Only administrators or configured support roles can generate ticket transcripts.")
+                        .WithColor(0x40E0D0)
+                        .Build();
+                    await ReplyAsync(embed: noPermissionEmbed);
                     return;
                 }
 
